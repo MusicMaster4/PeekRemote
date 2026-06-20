@@ -59,8 +59,12 @@ mac:
         - arm64
   category: public.app-category.utilities
   artifactName: ${productName}-${version}-${arch}.${ext}
-  hardenedRuntime: true
+  # Unsigned by default so CI builds succeed without an Apple certificate.
+  # hardenedRuntime/entitlements only matter when signing; turn it on together
+  # with signing once you add an Apple Developer cert.
+  hardenedRuntime: false
   gatekeeperAssess: false
+  notarize: false
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
   # macOS auto-update REQUIRES a signed app. Provide Apple signing/notarization

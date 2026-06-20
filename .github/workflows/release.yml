@@ -164,6 +164,10 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Skip code signing when no certificate is configured (default). This
+          # still lets signing kick in automatically if you add CSC_LINK, since
+          # an explicit cert overrides auto-discovery.
+          CSC_IDENTITY_AUTO_DISCOVERY: "false"
           # Optional code signing — set these repo secrets to enable.
           # Windows: CSC_LINK (base64 .pfx), CSC_KEY_PASSWORD
           CSC_LINK: ${{ secrets.CSC_LINK }}
