@@ -57,12 +57,19 @@ jobs:
         shell: bash
         run: |
           # Defaults make a push event behave like a normal patch release.
-          BUMP="${{ inputs.bump }}";    [ -z "$BUMP" ] && BUMP=patch
-          PUBLISH="${{ inputs.publish }}"; [ -z "$PUBLISH" ] && PUBLISH=true
+          # (GitHub runs bash with `set -eo pipefail`, so be careful below.)
+          BUMP="${{ inputs.bump }}"
+          PUBLISH="${{ inputs.publish }}"
+          if [ -z "$BUMP" ]; then BUMP=patch; fi
+          if [ -z "$PUBLISH" ]; then PUBLISH=true; fi
 
           PKG=$(node -p "require('./desktop/package.json').version")
+
+          # On the first build there are no tags: `grep` matches nothing and
+          # exits 1, which (with pipefail) would kill the step — `|| true`
+          # keeps it alive and leaves LATEST empty.
           LATEST=$(git tag -l 'v*' | sed 's/^v//' \
-            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)
 
           bump() { # $1=version $2=level
             IFS=. read -r MA MI PA <<< "$1"
