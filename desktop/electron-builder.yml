@@ -48,27 +48,25 @@ nsis:
 
 mac:
   icon: build/icon.png
+  # arm64 only: CI builds the Python backend for the runner's native arch
+  # (Apple Silicon), so a single-arch app keeps the bundled backend correct
+  # instead of shipping an Intel app with an arm64 backend.
   target:
     - target: dmg
       arch:
-        - x64
         - arm64
     - target: zip
       arch:
-        - x64
         - arm64
   category: public.app-category.utilities
   artifactName: ${productName}-${version}-${arch}.${ext}
-  # Unsigned by default so CI builds succeed without an Apple certificate.
-  # hardenedRuntime/entitlements only matter when signing; turn it on together
-  # with signing once you add an Apple Developer cert.
-  hardenedRuntime: false
   gatekeeperAssess: false
-  notarize: false
+  hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.plist
-  # macOS auto-update REQUIRES a signed app. Provide Apple signing/notarization
-  # secrets in CI to enable it; otherwise the DMG is unsigned (manual update).
+  # Unsigned by default (no Apple cert) so the .dmg builds in CI. Signing +
+  # notarization (required for macOS auto-update to apply) switch on
+  # automatically when the Apple secrets are present — see the workflow.
 
 dmg:
   artifactName: ${productName}-${version}-${arch}.${ext}

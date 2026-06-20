@@ -159,23 +159,39 @@ jobs:
         working-directory: desktop
         run: npm install
 
+      # Only export signing vars when the secrets actually exist. Passing an
+      # EMPTY CSC_LINK makes electron-builder think a certificate is provided and
+      # try to read it from path "" → "<dir> not a file" failure on macOS.
+      - name: Configure code signing
+        shell: bash
+        env:
+          SECRET_CSC_LINK: ${{ secrets.CSC_LINK }}
+          SECRET_CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          SECRET_APPLE_ID: ${{ secrets.APPLE_ID }}
+          SECRET_APPLE_PW: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          SECRET_APPLE_TEAM: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -n "$SECRET_CSC_LINK" ]; then
+            echo "CSC_LINK=$SECRET_CSC_LINK" >> "$GITHUB_ENV"
+            echo "CSC_KEY_PASSWORD=$SECRET_CSC_KEY_PASSWORD" >> "$GITHUB_ENV"
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=true" >> "$GITHUB_ENV"
+            echo "signing: ENABLED (certificate provided)"
+          else
+            # No cert → tell electron-builder to skip signing cleanly.
+            echo "CSC_IDENTITY_AUTO_DISCOVERY=false" >> "$GITHUB_ENV"
+            echo "signing: disabled (no certificate)"
+          fi
+          if [ -n "$SECRET_APPLE_ID" ]; then
+            echo "APPLE_ID=$SECRET_APPLE_ID" >> "$GITHUB_ENV"
+            echo "APPLE_APP_SPECIFIC_PASSWORD=$SECRET_APPLE_PW" >> "$GITHUB_ENV"
+            echo "APPLE_TEAM_ID=$SECRET_APPLE_TEAM" >> "$GITHUB_ENV"
+          fi
+
       - name: Build & publish desktop app
         working-directory: desktop
         shell: bash
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Skip code signing when no certificate is configured (default). This
-          # still lets signing kick in automatically if you add CSC_LINK, since
-          # an explicit cert overrides auto-discovery.
-          CSC_IDENTITY_AUTO_DISCOVERY: "false"
-          # Optional code signing — set these repo secrets to enable.
-          # Windows: CSC_LINK (base64 .pfx), CSC_KEY_PASSWORD
-          CSC_LINK: ${{ secrets.CSC_LINK }}
-          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
-          # macOS notarization (needed for macOS auto-update to apply).
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
           if [ "${{ needs.version.outputs.publish }}" = "true" ]; then
             npx electron-builder --publish always
