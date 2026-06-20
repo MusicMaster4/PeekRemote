@@ -1,0 +1,57 @@
+# Environment and secrets
+.env
+.env.*
+!.env.example
+.gmail/
+token.json
+credentials.json
+client_secret*.json
+*.pem
+*.key
+*.crt
+*.p12
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.python-version
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Build and packaging
+build/
+dist/
+*.egg-info/
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+
+# Test and coverage artifacts
+.pytest_cache/
+.coverage
+htmlcov/
+playwright-report/
+test-results/
+web/_shots/
+web/_uitest.mjs
+
+# IDE and OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs and temporary files
+*.log
+audit.log
+audit*.log
+screenshot_*.png
+*.tmp
+*.bak

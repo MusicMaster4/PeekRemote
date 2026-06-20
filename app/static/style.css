@@ -1,0 +1,1150 @@
+/* ============================================================
+   Peek Remote — Noir Editorial
+   Dark mode minimalista, preto & branco, baixo contraste.
+   Inspiração: fotografia de moda B&W anos 50, film noir,
+   luz e sombra dramáticas, tipografia de revista.
+   ============================================================ */
+
+:root {
+  color-scheme: dark;
+
+  /* Superfícies */
+  --bg: #0a0a0b;
+  --bg-soft: #0e0e0f;
+  --panel: rgba(255, 255, 255, 0.022);
+  --panel-strong: rgba(255, 255, 255, 0.04);
+  --panel-solid: #141416;
+
+  /* Linhas */
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.18);
+
+  /* Texto (monocromático, suave — baixo contraste) */
+  --white: #f4f2ec;
+  --text: #e3e1db;
+  --muted: #97958e;
+  --faint: #66645e;
+
+  /* Estados */
+  --danger: #d97a6c;
+
+  --radius: 14px;
+  --radius-sm: 9px;
+  --shadow: 0 30px 80px rgba(0, 0, 0, 0.55);
+  --shadow-soft: 0 18px 48px rgba(0, 0, 0, 0.4);
+
+  --serif: "Playfair Display", "Georgia", serif;
+  --sans: "Inter", "Segoe UI", system-ui, sans-serif;
+
+  font-family: var(--sans);
+  background: var(--bg);
+  color: var(--text);
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  min-height: 100svh;
+}
+
+body {
+  position: relative;
+  background:
+    radial-gradient(120% 80% at 50% -20%, rgba(255, 255, 255, 0.06), transparent 55%),
+    radial-gradient(90% 60% at 80% 110%, rgba(255, 255, 255, 0.03), transparent 60%),
+    var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Grão de filme — overlay fixo, muito sutil */
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  pointer-events: none;
+  opacity: 0.05;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+  mix-blend-mode: overlay;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button {
+  border: 0;
+  background: none;
+  cursor: pointer;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+::selection {
+  background: rgba(244, 242, 236, 0.18);
+}
+
+/* ---------- Tipografia utilitária ---------- */
+
+.eyebrow {
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.brand-title {
+  font-family: var(--serif);
+  font-weight: 500;
+  font-style: italic;
+  letter-spacing: 0.01em;
+  color: var(--white);
+}
+
+/* ============================================================
+   APP SHELL
+   ============================================================ */
+
+.app-shell {
+  width: min(1080px, calc(100vw - 40px));
+  margin: 0 auto;
+  padding: calc(28px + env(safe-area-inset-top)) 0 calc(48px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 22px;
+}
+
+/* ---------- Topbar ---------- */
+
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 22px;
+  border-bottom: 1px solid var(--line);
+}
+
+.brand {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.brand .brand-title {
+  font-size: clamp(1.7rem, 4vw, 2.4rem);
+  line-height: 1;
+}
+
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 13px 7px 11px;
+  margin-right: 4px;
+  border: 1px solid var(--line);
+  border-radius: 100px;
+  font-size: 0.7rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.status-pill .dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text);
+  box-shadow: 0 0 0 0 rgba(244, 242, 236, 0.5);
+  animation: breathe 3.2s ease-in-out infinite;
+}
+
+/* ---------- Botão ícone ---------- */
+
+.icon-btn {
+  width: 44px;
+  height: 44px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel);
+  color: var(--muted);
+  transition: color 180ms ease, border-color 180ms ease, background 180ms ease, transform 180ms ease;
+}
+
+.icon-btn svg {
+  width: 19px;
+  height: 19px;
+}
+
+.icon-btn:hover {
+  color: var(--white);
+  border-color: var(--line-strong);
+  background: var(--panel-strong);
+}
+
+.icon-btn:active {
+  transform: scale(0.94);
+}
+
+.icon-btn.danger:hover {
+  color: var(--danger);
+  border-color: color-mix(in srgb, var(--danger) 50%, transparent);
+}
+
+/* ============================================================
+   STAGE — palco da captura
+   ============================================================ */
+
+.stage {
+  position: relative;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.02), transparent 40%),
+    var(--bg-soft);
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.stage-viewport {
+  position: relative;
+  aspect-ratio: 16 / 9;
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(120% 120% at 50% 0%, rgba(255, 255, 255, 0.025), transparent 60%),
+    repeating-linear-gradient(0deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 38px),
+    repeating-linear-gradient(90deg, rgba(255, 255, 255, 0.015) 0 1px, transparent 1px 38px),
+    #090909;
+}
+
+/* Empty state */
+.empty-state {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 18px;
+  padding: 32px;
+  text-align: center;
+  color: var(--faint);
+}
+
+.empty-state[hidden] {
+  display: none;
+}
+
+.empty-glyph {
+  position: relative;
+  width: 78px;
+  height: 78px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--muted);
+  overflow: hidden;
+}
+
+.empty-glyph svg {
+  width: 32px;
+  height: 32px;
+}
+
+.empty-glyph .scan {
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(180deg, transparent, rgba(255, 255, 255, 0.16), transparent);
+  animation: scan 3.4s ease-in-out infinite;
+}
+
+.empty-state .lead {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1.35rem;
+  color: var(--text);
+}
+
+.empty-state .hint {
+  font-size: 0.85rem;
+  color: var(--faint);
+  max-width: 280px;
+  line-height: 1.5;
+}
+
+/* Preview */
+.preview {
+  position: absolute;
+  inset: 0;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+}
+
+.preview[hidden] {
+  display: none;
+}
+
+.preview-frame {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border-radius: var(--radius-sm);
+  background: #000;
+  cursor: zoom-in;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.preview-frame img {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  display: block;
+}
+
+.preview-frame::after {
+  content: "⤢  Ampliar";
+  position: absolute;
+  right: 26px;
+  bottom: 24px;
+  padding: 6px 12px;
+  border-radius: 100px;
+  background: rgba(10, 10, 11, 0.72);
+  border: 1px solid var(--line);
+  backdrop-filter: blur(8px);
+  font-size: 0.72rem;
+  letter-spacing: 0.06em;
+  color: var(--text);
+  opacity: 0;
+  transform: translateY(6px);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+
+.preview-frame:hover::after {
+  opacity: 1;
+  transform: translateY(0);
+}
+
+/* Em telas de toque o hover não dispara — manter sempre visível */
+@media (hover: none) {
+  .preview-frame::after {
+    content: "⤢  Toque para ampliar";
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Caption sobre o stage */
+.stage-caption {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 20px;
+  border-top: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.012);
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.stage-caption .meta {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.stage-caption .meta span {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.stage-caption .meta .label {
+  color: var(--faint);
+  letter-spacing: 0.04em;
+}
+
+.live-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.68rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.live-tag .dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+/* ============================================================
+   ACTION BAR
+   ============================================================ */
+
+.action-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+
+.status-line {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 24px;
+  color: var(--muted);
+  font-size: 0.9rem;
+  flex: 1;
+  min-width: 200px;
+}
+
+.status-line .spark {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--faint);
+  flex-shrink: 0;
+  transition: background 200ms ease;
+}
+
+.status-line.is-busy .spark {
+  background: var(--white);
+  animation: blink 1s ease-in-out infinite;
+}
+
+.status-line.is-error .spark {
+  background: var(--danger);
+}
+
+/* Botão primário — único elemento "cheio": hierarquia clara em B&W */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  min-height: 56px;
+  padding: 0 30px;
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  color: #0a0a0b;
+  font-size: 0.95rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  box-shadow: 0 14px 38px rgba(0, 0, 0, 0.45);
+  transition: transform 180ms ease, box-shadow 180ms ease, opacity 180ms ease;
+}
+
+.btn-primary svg {
+  width: 20px;
+  height: 20px;
+}
+
+.btn-primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 22px 52px rgba(0, 0, 0, 0.55);
+}
+
+.btn-primary:active {
+  transform: translateY(0);
+}
+
+.btn-primary:disabled {
+  cursor: wait;
+  opacity: 0.55;
+  transform: none;
+  box-shadow: none;
+}
+
+.btn-primary .shutter {
+  display: inline-grid;
+  place-items: center;
+}
+
+.btn-primary.is-loading .shutter {
+  animation: spin 1.1s linear infinite;
+}
+
+/* ============================================================
+   FILMSTRIP — histórico
+   ============================================================ */
+
+.filmstrip {
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.filmstrip-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.filmstrip-head h2 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 1.15rem;
+  color: var(--text);
+}
+
+.filmstrip-head .count {
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+
+.history-list {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+}
+
+.history-item {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--panel-solid);
+  overflow: hidden;
+  transition: border-color 180ms ease, transform 180ms ease;
+  filter: grayscale(0.15);
+}
+
+.history-item:hover {
+  border-color: var(--line-strong);
+  transform: translateY(-2px);
+}
+
+.history-item.is-selected {
+  border-color: var(--white);
+  box-shadow: inset 0 0 0 1px var(--white);
+  filter: grayscale(0);
+}
+
+.history-item img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+
+.history-item span {
+  position: absolute;
+  left: 7px;
+  bottom: 7px;
+  padding: 3px 7px;
+  border-radius: 5px;
+  background: rgba(0, 0, 0, 0.66);
+  backdrop-filter: blur(4px);
+  font-size: 0.66rem;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  color: var(--text);
+}
+
+.history-empty {
+  grid-column: 1 / -1;
+  padding: 22px;
+  text-align: center;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius-sm);
+  color: var(--faint);
+  font-size: 0.85rem;
+}
+
+/* ============================================================
+   MODAIS
+   ============================================================ */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(5, 5, 6, 0.82);
+  backdrop-filter: blur(6px);
+  animation: fade 200ms ease;
+}
+
+.modal[hidden] {
+  display: none;
+}
+
+/* Zoom */
+.zoom-surface {
+  width: min(96vw, 1480px);
+  height: min(92vh, 900px);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #060606;
+  box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.zoom-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 13px 13px 13px 20px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.zoom-surface img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  display: block;
+  background: #000;
+}
+
+/* Diálogo de confirmação (suspender) */
+.dialog {
+  width: min(440px, 100%);
+  padding: 30px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--panel-solid);
+  box-shadow: var(--shadow);
+  text-align: center;
+  animation: rise 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.dialog .dialog-glyph {
+  width: 56px;
+  height: 56px;
+  margin: 0 auto 18px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  color: var(--text);
+}
+
+.dialog .dialog-glyph svg {
+  width: 26px;
+  height: 26px;
+}
+
+.dialog h3 {
+  font-family: var(--serif);
+  font-style: italic;
+  font-weight: 500;
+  font-size: 1.55rem;
+  color: var(--white);
+  margin-bottom: 10px;
+}
+
+.dialog p {
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--muted);
+  margin-bottom: 24px;
+}
+
+.dialog-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 11px;
+}
+
+.btn-ghost {
+  min-height: 50px;
+  padding: 0 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  transition: background 180ms ease, border-color 180ms ease;
+}
+
+.btn-ghost:hover {
+  background: var(--panel-strong);
+  border-color: var(--white);
+}
+
+.btn-solid {
+  min-height: 50px;
+  padding: 0 18px;
+  border-radius: var(--radius-sm);
+  background: var(--white);
+  color: #0a0a0b;
+  font-weight: 600;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+
+.btn-solid:hover {
+  transform: translateY(-1px);
+}
+
+.btn-solid:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+
+/* ============================================================
+   TOAST de contagem (suspensão agendada)
+   ============================================================ */
+
+.toast {
+  position: fixed;
+  left: 50%;
+  bottom: 30px;
+  z-index: 60;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 14px 16px 14px 22px;
+  border: 1px solid var(--line-strong);
+  border-radius: 100px;
+  background: rgba(20, 20, 22, 0.92);
+  box-shadow: var(--shadow);
+  backdrop-filter: blur(12px);
+  animation: rise 280ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+.toast[hidden] {
+  display: none;
+}
+
+.toast .toast-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.toast .toast-text strong {
+  font-weight: 600;
+  color: var(--white);
+  font-size: 0.92rem;
+}
+
+.toast .toast-text small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.toast .countdown {
+  font-family: var(--serif);
+  font-style: italic;
+  font-size: 1.4rem;
+  color: var(--white);
+  min-width: 1.4ch;
+  text-align: center;
+}
+
+.toast .btn-cancel {
+  padding: 9px 18px;
+  border: 1px solid var(--line-strong);
+  border-radius: 100px;
+  color: var(--text);
+  font-weight: 500;
+  font-size: 0.85rem;
+  transition: background 160ms ease, border-color 160ms ease;
+}
+
+.toast .btn-cancel:hover {
+  background: var(--panel-strong);
+  border-color: var(--white);
+}
+
+/* ============================================================
+   LOGIN
+   ============================================================ */
+
+.login-body {
+  display: grid;
+  place-items: center;
+  padding: calc(24px + env(safe-area-inset-top)) calc(24px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom)) calc(24px + env(safe-area-inset-left));
+}
+
+.login-shell {
+  width: min(420px, 100%);
+}
+
+.login-card {
+  position: relative;
+  padding: 44px 38px 38px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.025), transparent 30%),
+    var(--bg-soft);
+  box-shadow: var(--shadow);
+  text-align: center;
+}
+
+.login-card .eyebrow {
+  margin-bottom: 14px;
+}
+
+.login-card .brand-title {
+  font-size: clamp(2.2rem, 7vw, 3rem);
+  line-height: 1;
+  margin-bottom: 6px;
+}
+
+.login-card .sub {
+  font-size: 0.88rem;
+  color: var(--faint);
+  margin-bottom: 34px;
+  line-height: 1.5;
+}
+
+.login-form {
+  display: grid;
+  gap: 16px;
+}
+
+.login-form label {
+  text-align: left;
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.login-form input {
+  width: 100%;
+  height: 64px;
+  padding: 0 20px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.35);
+  color: var(--white);
+  font-size: 1.5rem;
+  font-weight: 500;
+  text-align: center;
+  letter-spacing: 0.55em;
+  text-indent: 0.55em;
+  outline: none;
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.login-form input::placeholder {
+  color: var(--faint);
+  letter-spacing: 0.4em;
+}
+
+.login-form input:focus {
+  border-color: var(--line-strong);
+  background: rgba(0, 0, 0, 0.5);
+  box-shadow: 0 0 0 4px rgba(255, 255, 255, 0.05);
+}
+
+.login-form .btn-primary {
+  width: 100%;
+  margin-top: 6px;
+}
+
+.login-status {
+  min-height: 1.2rem;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.login-status.is-error {
+  color: var(--danger);
+}
+
+/* ============================================================
+   ANIMAÇÕES
+   ============================================================ */
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+@keyframes breathe {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 rgba(244, 242, 236, 0.45);
+  }
+  50% {
+    box-shadow: 0 0 0 6px rgba(244, 242, 236, 0);
+  }
+}
+
+@keyframes scan {
+  0%,
+  100% {
+    transform: translateY(-100%);
+    opacity: 0;
+  }
+  50% {
+    opacity: 1;
+  }
+  60% {
+    transform: translateY(100%);
+  }
+}
+
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px) translateX(-50%);
+  }
+}
+
+.dialog {
+  animation-name: rise-center;
+}
+
+@keyframes rise-center {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::after,
+  *::before {
+    animation: none !important;
+    transition: none !important;
+  }
+}
+
+/* ============================================================
+   RESPONSIVO — otimizado para celular
+   ============================================================ */
+
+@media (max-width: 720px) {
+  .app-shell {
+    width: calc(100vw - 24px);
+    /* espaço extra no fim para a action-bar fixa não cobrir conteúdo */
+    padding: calc(16px + env(safe-area-inset-top)) 0
+      calc(110px + env(safe-area-inset-bottom));
+    gap: 16px;
+  }
+
+  /* Topbar mais enxuta */
+  .topbar {
+    padding-bottom: 16px;
+  }
+
+  .brand .brand-title {
+    font-size: 1.5rem;
+  }
+
+  .status-pill {
+    display: none; /* economiza espaço; o ponto "ao vivo" no stage já indica estado */
+  }
+
+  /* Stage: deixa o screenshot do desktop o maior possível em retrato */
+  .stage-viewport {
+    aspect-ratio: 4 / 3;
+  }
+
+  .stage-caption {
+    padding: 11px 14px;
+    font-size: 0.76rem;
+  }
+
+  .stage-caption .meta {
+    gap: 12px;
+  }
+
+  /* Action bar FIXA no rodapé — captura sempre ao alcance do polegar */
+  .action-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 10px;
+    padding: 12px 14px calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(10, 10, 11, 0) 0%, rgba(10, 10, 11, 0.92) 28%, var(--bg) 100%);
+    backdrop-filter: blur(10px);
+    border-top: 1px solid var(--line);
+  }
+
+  .btn-primary {
+    width: 100%;
+    min-height: 58px;
+    font-size: 1rem;
+  }
+
+  .status-line {
+    justify-content: center;
+    text-align: center;
+    min-width: 0;
+    font-size: 0.82rem;
+  }
+
+  /* Filmstrip vira carrossel horizontal com snap */
+  .history-list {
+    display: flex;
+    gap: 10px;
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    -webkit-overflow-scrolling: touch;
+    padding-bottom: 4px;
+    margin: 0 -2px;
+    scrollbar-width: none;
+  }
+
+  .history-list::-webkit-scrollbar {
+    display: none;
+  }
+
+  .history-item {
+    flex: 0 0 42%;
+    scroll-snap-align: start;
+  }
+
+  .history-empty {
+    flex: 1;
+  }
+
+  /* Zoom em tela cheia para conseguir ler o desktop no celular */
+  .modal {
+    padding: 0;
+  }
+
+  .zoom-surface {
+    width: 100vw;
+    height: 100svh;
+    max-width: none;
+    border: 0;
+    border-radius: 0;
+    grid-template-rows: calc(54px + env(safe-area-inset-top)) minmax(0, 1fr);
+  }
+
+  .zoom-toolbar {
+    padding: calc(8px + env(safe-area-inset-top)) 10px 8px 18px;
+  }
+
+  /* Permite dar pinch/arrastar para inspecionar detalhes do desktop */
+  .zoom-surface img {
+    object-fit: contain;
+    touch-action: pinch-zoom;
+  }
+
+  /* Diálogo de suspender encostado no rodapé, formato bottom-sheet */
+  .dialog {
+    width: calc(100% - 24px);
+    align-self: end;
+    margin-bottom: calc(12px + env(safe-area-inset-bottom));
+    padding: 26px 22px 24px;
+  }
+
+  /* Toast acima da action-bar fixa */
+  .toast {
+    left: 12px;
+    right: 12px;
+    bottom: calc(96px + env(safe-area-inset-bottom));
+    transform: none;
+    border-radius: var(--radius);
+    flex-wrap: wrap;
+    gap: 12px 16px;
+  }
+
+  .toast .btn-cancel {
+    flex: 1;
+    text-align: center;
+  }
+
+  @keyframes rise {
+    from {
+      opacity: 0;
+      transform: translateY(14px);
+    }
+  }
+}
+
+@media (max-width: 380px) {
+  .history-item {
+    flex-basis: 52%;
+  }
+
+  .icon-btn {
+    width: 42px;
+    height: 42px;
+  }
+}
+
+/* Telas muito baixas em paisagem: solta a action-bar fixa */
+@media (max-width: 720px) and (max-height: 480px) {
+  .action-bar {
+    position: static;
+    background: none;
+    border-top: 0;
+    backdrop-filter: none;
+    padding: 0;
+  }
+
+  .app-shell {
+    padding-bottom: calc(32px + env(safe-area-inset-bottom));
+  }
+}

@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <title>Entrar · Peek Remote</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:ital,wght@0,500;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body class="login-body">
+    <main class="login-shell">
+      <section class="login-card">
+        <p class="eyebrow">Acesso remoto</p>
+        <h1 class="brand-title">Peek Remote</h1>
+        <p class="sub">Informe seu PIN de 6 dígitos para continuar.</p>
+        <form id="login-form" class="login-form">
+          <label for="pin-input">PIN de acesso</label>
+          <input
+            id="pin-input"
+            name="pin"
+            type="password"
+            inputmode="numeric"
+            pattern="[0-9]{6}"
+            maxlength="6"
+            autocomplete="one-time-code"
+            placeholder="••••••"
+            required
+            autofocus
+          />
+          <button id="login-btn" class="btn-primary" type="submit">Entrar</button>
+          <p id="login-status" class="login-status" role="status"></p>
+        </form>
+      </section>
+    </main>
+
+    <script>
+      const form = document.getElementById("login-form");
+      const input = document.getElementById("pin-input");
+      const button = document.getElementById("login-btn");
+      const status = document.getElementById("login-status");
+
+      input.addEventListener("input", () => {
+        input.value = input.value.replace(/\D/g, "").slice(0, 6);
+        status.textContent = "";
+        status.classList.remove("is-error");
+      });
+
+      form.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        button.disabled = true;
+        status.classList.remove("is-error");
+        status.textContent = "Verificando…";
+
+        try {
+          const response = await fetch("/api/login", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ pin: input.value }),
+          });
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || "PIN inválido.");
+          }
+          window.location.href = "/";
+        } catch (error) {
+          status.textContent = error.message;
+          status.classList.add("is-error");
+          button.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>

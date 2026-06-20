@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <meta name="theme-color" content="#0a0a0b" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>Peek Remote</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&family=Playfair+Display:ital,wght@0,500;1,500&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/style.css" />
+  </head>
+  <body>
+    <main class="app-shell">
+      <!-- Topbar -->
+      <header class="topbar">
+        <div class="brand">
+          <span class="eyebrow">Console remoto</span>
+          <h1 class="brand-title">Peek Remote</h1>
+        </div>
+        <div class="topbar-actions">
+          <span class="status-pill"><span class="dot"></span> Conectado</span>
+          <button id="suspend-btn" class="icon-btn" type="button" title="Suspender computador" aria-label="Suspender computador">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
+            </svg>
+          </button>
+          <button id="logout-btn" class="icon-btn danger" type="button" title="Sair" aria-label="Sair">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+              <polyline points="16 17 21 12 16 7" />
+              <line x1="21" y1="12" x2="9" y2="12" />
+            </svg>
+          </button>
+        </div>
+      </header>
+
+      <!-- Stage -->
+      <section class="stage" aria-live="polite">
+        <div class="stage-viewport">
+          <div id="empty-state" class="empty-state">
+            <div class="empty-glyph">
+              <span class="scan" aria-hidden="true"></span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+                <circle cx="12" cy="13" r="4" />
+              </svg>
+            </div>
+            <p class="lead">Nenhum print ainda.</p>
+            <p class="hint">Clique em <strong>Capturar tela</strong> para ver, ao vivo, o que está acontecendo no computador.</p>
+          </div>
+
+          <figure id="preview" class="preview" hidden>
+            <button id="zoom-btn" class="preview-frame" type="button" aria-label="Ampliar print">
+              <img id="preview-img" alt="Screenshot capturado" />
+            </button>
+          </figure>
+        </div>
+
+        <figcaption class="stage-caption">
+          <span class="live-tag"><span class="dot"></span> Captura ao vivo</span>
+          <div class="meta">
+            <span><span class="label">Horário</span> <span id="preview-time">—</span></span>
+            <span><span class="label">Resolução</span> <span id="preview-size">—</span></span>
+          </div>
+        </figcaption>
+      </section>
+
+      <!-- Action bar -->
+      <section class="action-bar">
+        <div id="status-line" class="status-line">
+          <span class="spark" aria-hidden="true"></span>
+          <span id="capture-status">Pronto para capturar.</span>
+        </div>
+        <button id="capture-btn" class="btn-primary" type="button">
+          <span class="shutter" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" />
+              <circle cx="12" cy="13" r="4" />
+            </svg>
+          </span>
+          Capturar tela
+        </button>
+      </section>
+
+      <!-- Filmstrip -->
+      <section class="filmstrip">
+        <div class="filmstrip-head">
+          <h2>Capturas recentes</h2>
+          <span id="history-count" class="count">0 / 5</span>
+        </div>
+        <div id="history-list" class="history-list" aria-label="Histórico de screenshots">
+          <p class="history-empty">As últimas 5 capturas aparecem aqui.</p>
+        </div>
+      </section>
+    </main>
+
+    <!-- Modal de zoom -->
+    <div id="zoom-modal" class="modal" hidden>
+      <div class="zoom-surface" role="dialog" aria-modal="true" aria-label="Screenshot ampliado">
+        <div class="zoom-toolbar">
+          <span id="zoom-title">Screenshot</span>
+          <button id="zoom-close" class="icon-btn" type="button" aria-label="Fechar">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18" />
+              <line x1="6" y1="6" x2="18" y2="18" />
+            </svg>
+          </button>
+        </div>
+        <img id="zoom-img" alt="Screenshot ampliado" />
+      </div>
+    </div>
+
+    <!-- Modal de confirmação: suspender -->
+    <div id="suspend-modal" class="modal" hidden>
+      <div class="dialog" role="dialog" aria-modal="true" aria-labelledby="suspend-title">
+        <div class="dialog-glyph">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z" />
+          </svg>
+        </div>
+        <h3 id="suspend-title">Suspender o computador?</h3>
+        <p>A máquina entrará em modo de suspensão em 10 segundos. Você poderá cancelar nesse intervalo.</p>
+        <div class="dialog-actions">
+          <button id="suspend-cancel" class="btn-ghost" type="button">Voltar</button>
+          <button id="suspend-confirm" class="btn-solid" type="button">Suspender</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast de contagem -->
+    <div id="suspend-toast" class="toast" hidden>
+      <span class="countdown" id="suspend-count">10</span>
+      <div class="toast-text">
+        <strong>Suspendendo…</strong>
+        <small>O computador será suspenso em instantes.</small>
+      </div>
+      <button id="suspend-abort" class="btn-cancel" type="button">Cancelar</button>
+    </div>
+
+    <script>
+      const captureBtn = document.getElementById("capture-btn");
+      const logoutBtn = document.getElementById("logout-btn");
+      const statusLine = document.getElementById("status-line");
+      const captureStatus = document.getElementById("capture-status");
+      const emptyState = document.getElementById("empty-state");
+      const preview = document.getElementById("preview");
+      const previewImg = document.getElementById("preview-img");
+      const previewTime = document.getElementById("preview-time");
+      const previewSize = document.getElementById("preview-size");
+      const zoomBtn = document.getElementById("zoom-btn");
+      const historyList = document.getElementById("history-list");
+      const historyCount = document.getElementById("history-count");
+      const zoomModal = document.getElementById("zoom-modal");
+      const zoomImg = document.getElementById("zoom-img");
+      const zoomTitle = document.getElementById("zoom-title");
+      const zoomClose = document.getElementById("zoom-close");
+
+      const suspendBtn = document.getElementById("suspend-btn");
+      const suspendModal = document.getElementById("suspend-modal");
+      const suspendCancel = document.getElementById("suspend-cancel");
+      const suspendConfirm = document.getElementById("suspend-confirm");
+      const suspendToast = document.getElementById("suspend-toast");
+      const suspendCount = document.getElementById("suspend-count");
+      const suspendAbort = document.getElementById("suspend-abort");
+
+      const timestampFormatter = new Intl.DateTimeFormat("pt-BR", {
+        dateStyle: "short",
+        timeStyle: "medium",
+      });
+      const timeFormatter = new Intl.DateTimeFormat("pt-BR", {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
+      const captures = [];
+      let selectedCapture = null;
+      let suspendJobId = null;
+      let suspendTimer = null;
+
+      /* ---------- Status helper ---------- */
+      function setStatus(text, state) {
+        captureStatus.textContent = text;
+        statusLine.classList.toggle("is-busy", state === "busy");
+        statusLine.classList.toggle("is-error", state === "error");
+      }
+
+      /* ---------- Captura ---------- */
+      captureBtn.addEventListener("click", captureScreen);
+
+      async function captureScreen() {
+        captureBtn.disabled = true;
+        captureBtn.classList.add("is-loading");
+        setStatus("Capturando a tela agora…", "busy");
+
+        try {
+          const response = await fetch("/api/screenshots/raw", { method: "POST" });
+          if (response.status === 401) {
+            window.location.href = "/login";
+            return;
+          }
+          if (!response.ok) {
+            const data = await response.json().catch(() => ({}));
+            throw new Error(data.detail || "Erro ao capturar a tela.");
+          }
+
+          const blob = await response.blob();
+          const capture = {
+            id: crypto.randomUUID(),
+            image: URL.createObjectURL(blob),
+            timestamp: response.headers.get("x-screenshot-timestamp") || new Date().toISOString(),
+            filename: response.headers.get("x-screenshot-filename") || "screenshot.png",
+            width: Number(response.headers.get("x-screenshot-width")) || 0,
+            height: Number(response.headers.get("x-screenshot-height")) || 0,
+          };
+          captures.unshift(capture);
+          captures.splice(5).forEach((oldCapture) => URL.revokeObjectURL(oldCapture.image));
+          selectCapture(capture);
+          renderHistory();
+          scrollHistoryToLatest();
+          setStatus("Tela capturada. Capture de novo quando quiser.", "ok");
+        } catch (error) {
+          setStatus(error.message, "error");
+        } finally {
+          captureBtn.disabled = false;
+          captureBtn.classList.remove("is-loading");
+        }
+      }
+
+      function selectCapture(capture) {
+        selectedCapture = capture;
+        emptyState.hidden = true;
+        preview.hidden = false;
+        previewImg.src = capture.image;
+        previewTime.textContent = formatTimestamp(capture.timestamp);
+        previewSize.textContent = `${capture.width} × ${capture.height}`;
+      }
+
+      function renderHistory() {
+        historyCount.textContent = `${captures.length} / 5`;
+        if (captures.length === 0) {
+          const empty = document.createElement("p");
+          empty.className = "history-empty";
+          empty.textContent = "As últimas 5 capturas aparecem aqui.";
+          historyList.replaceChildren(empty);
+          return;
+        }
+        historyList.replaceChildren();
+        captures.forEach((capture, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "history-item";
+          if (selectedCapture && selectedCapture.id === capture.id) {
+            button.classList.add("is-selected");
+          }
+          button.setAttribute("aria-label", `Abrir print ${index + 1}`);
+          const image = document.createElement("img");
+          image.src = capture.image;
+          image.alt = "";
+          image.decoding = "async";
+
+          const time = document.createElement("span");
+          time.textContent = formatTime(capture.timestamp);
+
+          button.append(image, time);
+          button.addEventListener("click", () => {
+            selectCapture(capture);
+            renderHistory();
+          });
+          historyList.appendChild(button);
+        });
+      }
+
+      function scrollHistoryToLatest() {
+        requestAnimationFrame(() => {
+          historyList.scrollTo({ left: 0, behavior: "smooth" });
+        });
+      }
+
+      /* ---------- Zoom ---------- */
+      zoomBtn.addEventListener("click", openZoom);
+      zoomClose.addEventListener("click", closeZoom);
+      zoomModal.addEventListener("click", (event) => {
+        if (event.target === zoomModal) closeZoom();
+      });
+
+      function openZoom() {
+        if (!selectedCapture) return;
+        zoomImg.src = selectedCapture.image;
+        zoomTitle.textContent = `${formatTimestamp(selectedCapture.timestamp)} · ${selectedCapture.width} × ${selectedCapture.height}px`;
+        zoomModal.hidden = false;
+      }
+
+      function closeZoom() {
+        zoomModal.hidden = true;
+        zoomImg.removeAttribute("src");
+      }
+
+      /* ---------- Suspender ---------- */
+      suspendBtn.addEventListener("click", () => {
+        suspendModal.hidden = false;
+      });
+      suspendCancel.addEventListener("click", () => {
+        suspendModal.hidden = true;
+      });
+      suspendModal.addEventListener("click", (event) => {
+        if (event.target === suspendModal) suspendModal.hidden = true;
+      });
+      suspendConfirm.addEventListener("click", scheduleSuspend);
+      suspendAbort.addEventListener("click", abortSuspend);
+
+      async function scheduleSuspend() {
+        suspendConfirm.disabled = true;
+        try {
+          const response = await fetch("/api/suspend", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ confirmation: "suspenso" }),
+          });
+          if (response.status === 401) {
+            window.location.href = "/login";
+            return;
+          }
+          if (!response.ok) {
+            const data = await response.json();
+            throw new Error(data.detail || "Não foi possível agendar a suspensão.");
+          }
+          const data = await response.json();
+          suspendJobId = data.job_id;
+          suspendModal.hidden = true;
+          startCountdown(10);
+        } catch (error) {
+          suspendModal.hidden = true;
+          setStatus(error.message, "error");
+        } finally {
+          suspendConfirm.disabled = false;
+        }
+      }
+
+      function startCountdown(seconds) {
+        let remaining = seconds;
+        suspendCount.textContent = remaining;
+        suspendToast.hidden = false;
+        suspendTimer = setInterval(() => {
+          remaining -= 1;
+          suspendCount.textContent = Math.max(remaining, 0);
+          if (remaining <= 0) {
+            clearInterval(suspendTimer);
+            suspendTimer = null;
+            suspendToast.hidden = true;
+            suspendJobId = null;
+          }
+        }, 1000);
+      }
+
+      async function abortSuspend() {
+        if (suspendTimer) {
+          clearInterval(suspendTimer);
+          suspendTimer = null;
+        }
+        suspendToast.hidden = true;
+        if (!suspendJobId) return;
+        try {
+          await fetch("/api/suspend/cancel", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ job_id: suspendJobId }),
+          });
+          setStatus("Suspensão cancelada.", "ok");
+        } catch (error) {
+          setStatus("Não foi possível cancelar a suspensão.", "error");
+        } finally {
+          suspendJobId = null;
+        }
+      }
+
+      /* ---------- Logout ---------- */
+      logoutBtn.addEventListener("click", async () => {
+        await fetch("/api/logout", { method: "POST" });
+        window.location.href = "/login";
+      });
+      window.addEventListener("beforeunload", () => {
+        captures.forEach((capture) => URL.revokeObjectURL(capture.image));
+      });
+
+      /* ---------- Teclado ---------- */
+      document.addEventListener("keydown", (event) => {
+        if (event.key !== "Escape") return;
+        if (!zoomModal.hidden) closeZoom();
+        else if (!suspendModal.hidden) suspendModal.hidden = true;
+      });
+
+      /* ---------- Formatação ---------- */
+      function formatTimestamp(value) {
+        return timestampFormatter.format(new Date(value));
+      }
+
+      function formatTime(value) {
+        return timeFormatter.format(new Date(value));
+      }
+    </script>
+  </body>
+</html>
