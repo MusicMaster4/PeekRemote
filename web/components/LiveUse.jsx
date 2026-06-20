@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { captureScreenshot, revokeScreenshot, sendInputAndCapture } from "@/lib/api";
 import {
   IconChevronLeft,
@@ -23,8 +23,12 @@ const MAX = 6;
 const SURFACE_GAP = 10;
 const AUTO_INTERVAL = 1500; // ms between frames while "Auto" is on
 
-// Ready-made combos — avoid typing and getting the syntax wrong.
-const PRESETS = [
+// Ready-made combos — avoid typing and getting the syntax wrong. They're OS
+// aware: the backend reports the HOST machine's OS (via /api/session → `os`) and
+// we show/send the combo that actually exists there. `cmd` and `win` both map to
+// the platform's super/command key on the backend, so the same key id works on
+// either OS.
+const PRESETS_WIN = [
   { label: "Copy", keys: ["ctrl", "c"] },
   { label: "Paste", keys: ["ctrl", "v"] },
   { label: "Cut", keys: ["ctrl", "x"] },
@@ -39,15 +43,40 @@ const PRESETS = [
   { label: "Win+D", keys: ["win", "d"] },
 ];
 
-const MODS = [
+// macOS analogs — ⌘ replaces Ctrl for editing, app switch/close/quit differ, and
+// there is no Alt+F4 / Task Manager / PrtSc.
+const PRESETS_MAC = [
+  { label: "Copy", keys: ["cmd", "c"] },
+  { label: "Paste", keys: ["cmd", "v"] },
+  { label: "Cut", keys: ["cmd", "x"] },
+  { label: "Select all", keys: ["cmd", "a"] },
+  { label: "Undo", keys: ["cmd", "z"] },
+  { label: "Redo", keys: ["cmd", "shift", "z"] },
+  { label: "Save", keys: ["cmd", "s"] },
+  { label: "⌘+Tab", keys: ["cmd", "tab"] },
+  { label: "Close", keys: ["cmd", "w"] },
+  { label: "Quit", keys: ["cmd", "q"] },
+  { label: "Force Quit", keys: ["cmd", "alt", "esc"] },
+  { label: "Spotlight", keys: ["cmd", "space"] },
+  { label: "Mission Ctrl", keys: ["ctrl", "up"] },
+];
+
+const MODS_WIN = [
   { id: "ctrl", label: "Ctrl" },
   { id: "alt", label: "Alt" },
   { id: "shift", label: "Shift" },
   { id: "win", label: "Win" },
 ];
 
-// Special keys (sent immediately on tap).
-const SPECIALS = [
+const MODS_MAC = [
+  { id: "ctrl", label: "⌃ Ctrl" },
+  { id: "alt", label: "⌥ Option" },
+  { id: "shift", label: "⇧ Shift" },
+  { id: "cmd", label: "⌘ Cmd" },
+];
+
+// Special keys (sent immediately on tap) — shared on both, plus an OS tail.
+const SPECIALS_BASE = [
   { label: "Esc", key: "esc" },
   { label: "Tab", key: "tab" },
   { label: "Enter", key: "enter" },
@@ -62,8 +91,17 @@ const SPECIALS = [
   { label: "End", key: "end" },
   { label: "PgUp", key: "page_up" },
   { label: "PgDn", key: "page_down" },
+];
+
+const SPECIALS_WIN = [
+  ...SPECIALS_BASE,
   { label: "PrtSc", key: "print_screen" },
   { label: "Win", key: "win" },
+];
+
+const SPECIALS_MAC = [
+  ...SPECIALS_BASE,
+  { label: "⌘", key: "cmd" },
 ];
 
 const FKEYS = Array.from({ length: 12 }, (_, i) => ({
@@ -71,7 +109,20 @@ const FKEYS = Array.from({ length: 12 }, (_, i) => ({
   key: `f${i + 1}`,
 }));
 
-const MOD_IDS = new Set(MODS.map((m) => m.id));
+// Build the keymap for the host OS. Anything that isn't macOS uses the Windows
+// set (also a reasonable default for Linux, where `win` = Super).
+function makeKeymap(os) {
+  const mac = os === "mac";
+  return {
+    presets: mac ? PRESETS_MAC : PRESETS_WIN,
+    mods: mac ? MODS_MAC : MODS_WIN,
+    specials: mac ? SPECIALS_MAC : SPECIALS_WIN,
+  };
+}
+
+// All modifier ids the combo parser should recognize, regardless of OS, so a
+// manually typed "cmd+space" or "win+e" is split correctly either way.
+const ALL_MOD_IDS = new Set(["ctrl", "alt", "shift", "win", "cmd", "super", "meta"]);
 const KEY_ALIASES = {
   ctl: "ctrl",
   control: "ctrl",
@@ -103,8 +154,9 @@ const normalizeKeyName = (value) => {
 };
 
 const NAMED_KEY_IDS = new Set([
-  ...MODS.map((m) => m.id),
-  ...SPECIALS.map((s) => s.key),
+  ...ALL_MOD_IDS,
+  ...SPECIALS_WIN.map((s) => s.key),
+  ...SPECIALS_MAC.map((s) => s.key),
   ...FKEYS.map((s) => s.key),
 ]);
 
@@ -160,7 +212,10 @@ export default function LiveUse({
   onSignOut,
   onSessions,
   isOwner = false,
+  os = "windows",
 }) {
+  // OS-aware shortcuts: labels + keys match the machine being controlled.
+  const keymap = useMemo(() => makeKeymap(os), [os]);
   const containerRef = useRef(null);
   const imgRef = useRef(null);
   const hLineRef = useRef(null);
@@ -511,7 +566,7 @@ export default function LiveUse({
     const mods = [...activeMods];
     const finalKeys = [];
     for (const key of typedKeys) {
-      if (MOD_IDS.has(key)) {
+      if (ALL_MOD_IDS.has(key)) {
         if (!mods.includes(key)) mods.push(key);
       } else {
         finalKeys.push(key);
@@ -975,14 +1030,14 @@ export default function LiveUse({
               {kbMode === "command" ? (
                 <>
                   <div className="no-scrollbar flex max-h-[88px] flex-wrap gap-1.5 overflow-y-auto">
-                    {PRESETS.map((p) => (
+                    {keymap.presets.map((p) => (
                       <button key={p.label} onClick={() => sendPreset(p)} className="chip-action">
                         {p.label}
                       </button>
                     ))}
                   </div>
                   <div className="flex flex-wrap items-center gap-1.5 border-t border-line pt-2.5">
-                    {MODS.map((m) => (
+                    {keymap.mods.map((m) => (
                       <Chip key={m.id} active={activeMods.includes(m.id)} onClick={() => toggleMod(m.id)}>
                         {m.label}
                       </Chip>
@@ -1038,7 +1093,7 @@ export default function LiveUse({
           {tab === "special" && (
             <div className="flex flex-col gap-2">
               <div className="grid grid-cols-4 gap-1.5">
-                {SPECIALS.map((s) => (
+                {keymap.specials.map((s) => (
                   <button key={s.key} onClick={() => sendSpecial(s)} className="chip-key">
                     {s.label}
                   </button>

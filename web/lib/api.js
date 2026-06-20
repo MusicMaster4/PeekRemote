@@ -46,14 +46,16 @@ export function revokeScreenshot(shot) {
 export async function getSession() {
   try {
     const res = await req("/api/session");
-    if (!res.ok) return { authenticated: false, isOwner: false };
+    if (!res.ok) return { authenticated: false, isOwner: false, os: "windows" };
     const data = await res.json();
     return {
       authenticated: Boolean(data.authenticated),
       isOwner: Boolean(data.is_owner),
+      // OS of the controlled machine, used to pick the right shortcuts.
+      os: data.os || "windows",
     };
   } catch {
-    return { authenticated: false, isOwner: false };
+    return { authenticated: false, isOwner: false, os: "windows" };
   }
 }
 

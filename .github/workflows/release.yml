@@ -1,0 +1,183 @@
+name: Build & Release
+
+# Self-versioning builds. Go to Actions → "Build & Release" → Run workflow.
+# Each run automatically computes the next version (latest release + 0.0.1 by
+# default), builds Windows + macOS, and publishes a GitHub Release with
+# auto-update metadata. No manual version editing needed.
+#
+#   • bump=patch (default) → 1.0.0 → 1.0.1 → 1.0.2 ...
+#   • bump=minor/major     → 1.0.x → 1.1.0 / 2.0.0
+#   • Need an exact version? Set it in desktop/package.json (higher than the
+#     latest release) and it will be used as-is for that run.
+#   • Uncheck "publish" for a test build (artifacts only, no release, no bump).
+on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: "Version increment"
+        type: choice
+        default: patch
+        options:
+          - patch
+          - minor
+          - major
+      publish:
+        description: "Publish a release (uncheck for a test build)"
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  # Resolve the next version and tag it, so the increment persists for next time.
+  version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.calc.outputs.version }}
+      tag: ${{ steps.calc.outputs.tag }}
+      publish: ${{ steps.calc.outputs.publish }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # need all tags to find the latest version
+
+      - id: calc
+        shell: bash
+        run: |
+          BUMP="${{ inputs.bump }}"
+          PUBLISH="${{ inputs.publish }}"
+          PKG=$(node -p "require('./desktop/package.json').version")
+          # Latest semver-shaped v* tag, if any.
+          LATEST=$(git tag -l 'v*' | sed 's/^v//' \
+            | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+
+          bump() { # $1=version $2=level
+            IFS=. read -r MA MI PA <<< "$1"
+            case "$2" in
+              major) echo "$((MA+1)).0.0" ;;
+              minor) echo "$MA.$((MI+1)).0" ;;
+              *)     echo "$MA.$MI.$((PA+1))" ;;
+            esac
+          }
+          gt() { [ "$1" != "$2" ] && \
+            [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | tail -1)" = "$1" ]; }
+
+          if [ -z "$LATEST" ]; then
+            NEW="$PKG"                 # first release uses package.json as-is
+          elif gt "$PKG" "$LATEST"; then
+            NEW="$PKG"                 # manual bump in package.json wins
+          else
+            NEW="$(bump "$LATEST" "$BUMP")"
+          fi
+
+          echo "version=$NEW"   >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW"      >> "$GITHUB_OUTPUT"
+          echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
+          echo "Resolved: v$NEW  (latest tag: ${LATEST:-none}, pkg: $PKG, bump: $BUMP, publish: $PUBLISH)"
+
+      - name: Tag the new version
+        if: steps.calc.outputs.publish == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          TAG="${{ steps.calc.outputs.tag }}"
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; reusing it."
+          else
+            git tag "$TAG"
+            git push origin "$TAG"
+          fi
+
+  build:
+    needs: version
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            name: windows
+          - os: macos-latest
+            name: macos
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Apply resolved version
+        shell: bash
+        working-directory: desktop
+        run: npm version "${{ needs.version.outputs.version }}" --no-git-tag-version --allow-same-version
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt pyinstaller
+
+      - name: Build frontend (Next.js static export)
+        working-directory: web
+        run: |
+          npm ci
+          npm run build
+
+      - name: Build backend (PyInstaller)
+        run: pyinstaller peek-backend.spec --noconfirm
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: npm install
+
+      - name: Build & publish desktop app
+        working-directory: desktop
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional code signing — set these repo secrets to enable.
+          # Windows: CSC_LINK (base64 .pfx), CSC_KEY_PASSWORD
+          CSC_LINK: ${{ secrets.CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+          # macOS notarization (needed for macOS auto-update to apply).
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ "${{ needs.version.outputs.publish }}" = "true" ]; then
+            npx electron-builder --publish always
+          else
+            npx electron-builder --publish never
+          fi
+
+      - name: Upload installers (test builds)
+        if: needs.version.outputs.publish != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: peek-remote-${{ matrix.name }}
+          path: |
+            dist-electron/*.exe
+            dist-electron/*.dmg
+            dist-electron/*.zip
+            dist-electron/*.yml
+          if-no-files-found: ignore
+
+  # Make the draft release public once both platforms have uploaded.
+  publish:
+    needs: [version, build]
+    if: needs.version.outputs.publish == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "${{ needs.version.outputs.tag }}" \
+            --repo "${{ github.repository }}" \
+            --draft=false --latest

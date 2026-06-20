@@ -5,9 +5,11 @@ import base64
 import hashlib
 import hmac
 import logging
+import platform
 import re
 import secrets
 import shlex
+import sys
 import time
 import uuid
 import webbrowser
@@ -32,11 +34,43 @@ from .screenshot import capture_screen
 app = FastAPI(title="Peek Remote")
 
 BASE_DIR = Path(__file__).resolve().parent
+
+
+def _frontend_dir() -> Path:
+    """Localiza o build estático do frontend Next.js (web/out).
+
+    No desenvolvimento ele fica em ../web/out. Quando empacotado pelo PyInstaller
+    (app desktop Electron), os dados ficam em sys._MEIPASS/web/out.
+    """
+    if getattr(sys, "frozen", False):
+        bundled = Path(getattr(sys, "_MEIPASS", BASE_DIR)) / "web" / "out"
+        if bundled.exists():
+            return bundled
+    return BASE_DIR.parent / "web" / "out"
+
+
 # Build estático do frontend Next.js (gerado por `npm run build` em web/).
-FRONTEND_DIR = BASE_DIR.parent / "web" / "out"
+FRONTEND_DIR = _frontend_dir()
 
 logger = logging.getLogger(__name__)
 TUNNEL_URL_RE = re.compile(r"https://[\w.-]*trycloudflare.com[\w./-]*")
+
+
+def _host_os() -> str:
+    """OS normalizado da MAQUINA controlada (host), exposto ao frontend para que
+    os atalhos do Modo Ao Vivo facam sentido no sistema certo (ex.: Cmd no Mac
+    em vez de Win/Ctrl)."""
+    system = platform.system()
+    if system == "Windows":
+        return "windows"
+    if system == "Darwin":
+        return "mac"
+    if system == "Linux":
+        return "linux"
+    return system.lower() or "unknown"
+
+
+HOST_OS = _host_os()
 
 AUTH_COOKIE_NAME = "remote_console_auth"
 SESSION_SECONDS = 12 * 60 * 60
@@ -495,10 +529,17 @@ async def on_shutdown() -> None:
 
 @app.get("/api/session")
 async def session_status(request: Request) -> JSONResponse:
-    """Informa ao frontend se a sessão atual está autenticada e se é a dona."""
+    """Informa ao frontend se a sessão atual está autenticada e se é a dona.
+
+    `os` é o sistema da máquina controlada; o frontend usa isso para mostrar e
+    enviar os atalhos certos (Cmd/Option no Mac, Ctrl/Win no Windows)."""
     session = _current_session(request)
     return JSONResponse(
-        {"authenticated": session is not None, "is_owner": bool(session and session.is_owner)}
+        {
+            "authenticated": session is not None,
+            "is_owner": bool(session and session.is_owner),
+            "os": HOST_OS,
+        }
     )
 
 
@@ -666,6 +707,52 @@ async def connect_page() -> HTMLResponse:
         ttl_seconds=settings.qr_ttl_seconds,
     )
     return HTMLResponse(html)
+
+
+@app.get("/api/health")
+async def health() -> JSONResponse:
+    """Sinal simples de "backend pronto" para o app desktop (Electron) poder
+    aguardar a inicialização antes de mostrar a tela de pareamento."""
+    return JSONResponse({"ok": True, "os": HOST_OS})
+
+
+@app.get("/api/connect-info")
+async def connect_info(request: Request) -> JSONResponse:
+    """Dados de pareamento para o painel desktop (Electron) desenhar o QR no tema
+    do app: URL da tailnet, link de login de uso único e quando ele expira.
+
+    Mesma confiança do `/connect`: emite um token de login para quem alcança o
+    app — adequado para uma tailnet pessoal de um único usuário.
+    """
+    app_url = await run_in_threadpool(connect.tailnet_url)
+    tailscale_ready = app_url is not None
+    if not tailscale_ready:
+        return JSONResponse(
+            {
+                "tailscale_ready": False,
+                "tailscale_found": connect.tailscale_exe() is not None,
+                "app_url": None,
+                "connect_url": None,
+                "expires_at": 0,
+                "ttl_seconds": settings.qr_ttl_seconds,
+                "os": HOST_OS,
+            }
+        )
+    token, expires_at = _sign_qr_token(settings.qr_ttl_seconds)
+    connect_url = f"{app_url}/api/qr-login?t={token}"
+    return JSONResponse(
+        {
+            "tailscale_ready": True,
+            "tailscale_found": True,
+            "app_url": app_url,
+            "connect_url": connect_url,
+            # SVG pronto (preto/branco, alto contraste) para o painel desktop
+            "qr_svg": connect.qr_svg(connect_url),
+            "expires_at": expires_at,
+            "ttl_seconds": settings.qr_ttl_seconds,
+            "os": HOST_OS,
+        }
+    )
 
 
 @app.get("/api/qr-login")

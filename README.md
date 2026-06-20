@@ -1,250 +1,240 @@
 # Peek Remote
 
-Peek Remote is a private web console for remotely accessing your own computer through Tailscale. It captures the host screen, shows recent captures in the browser, provides a live mode with periodic refresh, and sends mouse/keyboard commands back to the machine. It also includes a delayed sleep action with a short cancellation window.
+See and control your computer from your phone — privately, over your own
+Tailscale network. No public links, no accounts to create, no cloud in the
+middle. Open the app, scan a QR code with your phone, and you're in.
 
-This project is designed for personal, private use. It controls the computer running the server, so it should not be exposed directly to the public internet.
+---
 
-## How It Works
+## Install (the easy way)
 
-The app has two main parts:
+**Just want to use it? Download the installer — you don't need anything else
+technical.**
 
-- `app/`: FastAPI backend. It authenticates users, captures screenshots, injects mouse/keyboard input, manages sessions, publishes the service to the tailnet with `tailscale serve`, and generates the pairing QR code.
-- `web/`: Next.js frontend exported as a static site. The build output goes to `web/out` and is served by FastAPI.
+➡️ **[Download from the Releases page](https://github.com/MusicMaster4/PeekRemote/releases/latest)**
 
-Main flow:
+- **Windows** — download the `Peek Remote ... Setup.exe` and run it.
+- **macOS** — download the `Peek Remote ... .dmg`, open it, and drag the app to
+  Applications.
 
-1. The backend starts on `127.0.0.1:8000` by default.
-2. On startup, the app runs `tailscale serve --bg http://127.0.0.1:8000`.
-3. The app tries to discover the computer's MagicDNS URL, such as `https://my-pc.my-tailnet.ts.net`.
-4. The local `/connect` page opens on the PC and shows a QR code.
-5. Scanning the QR code opens the tailnet URL on the phone and logs in with a one-time HMAC token.
-6. After login, the browser calls the backend APIs using an HTTP-only cookie.
+The app updates itself from inside (see [Updates](#updates)), so you only ever
+download it once.
 
-Manual login with the configured 6-digit PIN is also supported.
+### The one thing you need: Tailscale
 
-## Features
+Peek Remote uses [Tailscale](https://tailscale.com/download) to create a private
+tunnel between your computer and your phone. It's free for personal use.
 
-- 6-digit PIN login.
-- QR pairing with a one-time token and configurable expiration.
-- On-demand screen capture.
-- Live mode with manual or automatic refresh.
-- Remote mouse control: click, double-click, drag, and scroll.
-- Remote keyboard control: text input, special keys, and shortcuts.
-- Session management: the first authenticated session becomes the owner and can revoke other sessions.
-- Sleep computer action with a 10-second cancellation window.
-- Local audit log for logins, logouts, blocks, revoked sessions, and sleep actions.
-- Security headers and disabled response caching.
+1. Install Tailscale on **this computer** and sign in.
+2. Install Tailscale on **your phone** and sign in to the **same account**.
+3. Keep it connected on both.
 
-## Requirements
+That's it — the in-app setup guide walks you through this the first time you open
+Peek Remote.
 
-- Windows 10/11 recommended.
-- Python 3.11 or 3.12.
-- Node.js LTS with npm.
-- Tailscale installed on the PC and phone.
-- A Tailscale account with both devices in the same tailnet.
-- MagicDNS enabled in the tailnet.
+---
 
-The backend has partial macOS/Linux support for sleep, but screen capture and remote input have primarily been built and tested for Windows.
+## First time you open it
 
-## Quick Setup On Windows
+A short setup guide appears and helps you:
 
-1. Clone the repository.
+1. **Check Tailscale** is installed and connected.
+2. **Pick a 6-digit PIN** (a fallback login for your phone).
+3. **Choose whether to start Peek Remote automatically** when your computer
+   turns on.
 
-```powershell
-git clone <repository-url>
-cd "Remote Screenshot to email"
+You can re-run this guide anytime from **Settings → Re-run setup**.
+
+---
+
+## Using it
+
+1. Open Peek Remote on your computer. It shows a **QR code**.
+2. On your phone, **scan the QR code** (just the camera app works). It opens your
+   private link and logs in automatically — no typing.
+3. You're now looking at your computer's screen. From there you can:
+   - **Move and click** by dragging a crosshair, with pinch-to-zoom.
+   - **Type** and send keyboard shortcuts.
+   - **Use ready-made shortcuts** (Copy, Paste, switch apps, etc.).
+   - **Put the computer to sleep** with a short cancel window.
+
+The QR refreshes on a timer for safety. If it expires, tap **New QR** or just
+reopen the app — it generates a fresh one.
+
+> **Shortcuts adapt to your computer.** If the computer you're controlling is a
+> Mac, the buttons show ⌘ Cmd / ⌥ Option and Mac shortcuts (Spotlight, ⌘+Tab,
+> Force Quit…). On Windows you get Ctrl / Alt / Win and Windows shortcuts
+> (Alt+Tab, Task Manager…). You don't have to think about it.
+
+Peek Remote keeps running quietly in the **tray / menu bar** so your phone can
+connect even when the window is closed. To fully stop remote access, use the tray
+icon → **Quit**.
+
+---
+
+## Settings
+
+Open the app window to find:
+
+- **Start on login** — launch Peek Remote (to the tray) when your computer boots.
+- **Auto-check for updates** — look for a new version on launch.
+- **Re-run setup** — go through the guide again to change your PIN or options.
+
+### Updates
+
+When a new version is available, Peek Remote tells you right inside the app.
+Click **Download**, then **Install & Restart** — it updates itself and keeps all
+your settings (your PIN and preferences are preserved). No reinstalling.
+
+---
+
+## A note on privacy
+
+Peek Remote can see your screen and control your mouse and keyboard, so treat it
+like a key to your computer:
+
+- It's only reachable through **your** Tailscale network — never the public
+  internet.
+- Use a PIN you don't use anywhere else.
+- Don't share your QR code or screenshots.
+- If you think someone saw your QR or PIN, reopen the app (a new key is created)
+  or remove unknown sessions from the sessions screen on your phone.
+
+> **Windows tip:** to control administrator windows (like Task Manager), right
+> click Peek Remote and choose **Run as administrator**.
+>
+> **macOS tip:** the first time you control your Mac, approve **Screen
+> Recording** and **Accessibility** for Peek Remote in System Settings → Privacy
+> & Security.
+
+---
+---
+
+## For developers (building from source)
+
+Everything below is optional — only needed if you want to build the app yourself
+or hack on it.
+
+### How it's built
+
+Peek Remote is an **Electron desktop app** that bundles a **Python (FastAPI)
+backend**:
+
+- **`desktop/`** — the Electron control panel (onboarding, QR pairing, settings,
+  in-app updates). It spawns and supervises the backend.
+- **`app/`** — the FastAPI backend. It captures the screen, injects mouse and
+  keyboard input, publishes the service to your tailnet with `tailscale serve`,
+  and serves the phone UI. The OS-level work (screen capture, input, sleep) is
+  why it stays in Python.
+- **`web/`** — the phone UI (Next.js, exported as a static site and served by the
+  backend). It adapts its shortcuts to the host OS reported by the backend.
+
+In a release build, the backend is compiled to a standalone executable with
+**PyInstaller** and shipped inside the Electron app, so end users never install
+Python.
+
+### Run it from source
+
+Clone into a folder named after the app:
+
+```bash
+git clone https://github.com/MusicMaster4/PeekRemote.git peek-remote
+cd peek-remote
 ```
 
-2. Create the Python virtual environment.
+**1. Backend (Python 3.11/3.12):**
 
-```powershell
+```bash
 python -m venv .venv
-.\.venv\Scripts\python -m pip install --upgrade pip
-.\.venv\Scripts\python -m pip install -r requirements.txt
+# Windows: .venv\Scripts\activate    macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-3. Install frontend dependencies and build the static UI.
+**2. Frontend (Node LTS):**
 
-```powershell
+```bash
 cd web
 npm install
-npm run build
+npm run build      # outputs web/out, served by the backend
 cd ..
 ```
 
-4. Create the `.env` file.
+**3. Desktop shell (Electron):**
 
-```powershell
-Copy-Item .env.example .env
-notepad .env
+```bash
+cd desktop
+npm install
+npm start          # runs Electron; in dev it launches the backend via the .venv
 ```
 
-Replace `APP_PIN=CHANGE_ME` with your own 6-digit PIN. The example value is intentionally invalid.
+In dev mode the Electron app runs the backend with the project's virtualenv
+Python (override with the `PEEK_BACKEND_PYTHON` environment variable).
 
-5. Start the app.
+### Build installers locally
 
-```powershell
-.\start_remote_console.bat
+```bash
+# from the repo root, with web/out already built:
+pip install pyinstaller
+pyinstaller peek-backend.spec --noconfirm      # -> dist/peek-backend/
+
+cd desktop
+npm install
+npm run dist                                    # -> dist-electron/
 ```
 
-The script asks for Administrator permission through UAC. This is required to send input to elevated Windows windows. Without Administrator mode, the app can still work with normal windows, but Windows blocks input into elevated apps.
+### Releasing (automated + self-versioning)
 
-## Tailscale Setup
+Releases build and **bump their own version** — you don't edit any version by
+hand. In GitHub: **Actions → "Build & Release" → Run workflow**.
 
-1. Install Tailscale on the PC: https://tailscale.com/download
-2. Sign in on the PC.
-3. Install Tailscale on the phone and sign in to the same account or tailnet.
-4. Enable MagicDNS in the Tailscale admin console if it is not already enabled.
-5. Keep Tailscale connected on both devices.
+- Each run computes the next version automatically: **latest release + 0.0.1**
+  (choose `minor`/`major` from the dropdown to jump further).
+- It then builds the Next.js frontend, the PyInstaller backend, and the Electron
+  installers for Windows and macOS, and publishes a GitHub Release with
+  auto-update metadata. Clients see the update in-app.
+- Need an **exact** version once? Set it in `desktop/package.json` (higher than
+  the latest release) and run the workflow — that version is used as-is.
+- Uncheck **publish** in the dropdown for a test build (uploads installers as
+  workflow artifacts, no release, no version bump).
 
-When Peek Remote starts, it runs:
+`.github/workflows/release.yml` drives all of this.
 
-```powershell
-tailscale serve --bg http://127.0.0.1:8000
-```
+- **Windows** auto-update works out of the box (unsigned is fine).
+- **macOS** auto-update requires a signed, notarized build. Add the signing
+  secrets (`CSC_LINK`, `CSC_KEY_PASSWORD`, `APPLE_ID`,
+  `APPLE_APP_SPECIFIC_PASSWORD`, `APPLE_TEAM_ID`) to the repo to enable it;
+  otherwise distribute the new `.dmg` manually.
 
-This publishes the local server only inside your tailnet. The URL looks similar to:
+### Backend configuration (advanced)
 
-```text
-https://my-pc.my-tailnet.ts.net
-```
-
-On the PC, the local `/connect` page shows a QR code. Scan it with the phone to open the tailnet URL and authenticate automatically. If the QR code expires, the page generates a new one.
-
-## Configuration
-
-Configuration lives in `.env`, which must not be committed.
+The desktop app passes configuration to the backend automatically (PIN, port,
+data directory). When running the backend directly, it reads the same values from
+the environment or a `.env` file:
 
 | Variable | Default | Description |
 | --- | --- | --- |
-| `APP_PIN` or `AUTH_PIN` | required | 6-digit numeric PIN. The server refuses to start without it. |
-| `SERVER_HOST` | `127.0.0.1` | Local FastAPI host. |
-| `SERVER_PORT` | `8000` | Local FastAPI port and Tailscale Serve target. |
-| `TAILSCALE_PATH` | empty | Path to `tailscale.exe`. Empty means autodetect. |
-| `QR_TTL_SECONDS` | `1800` | QR login token lifetime in seconds. |
-| `QR_OPEN_BROWSER` | `true` | Automatically opens `/connect` in the PC browser. |
-| `AUDIT_LOG_FILE` | `audit.log` | Local audit log file. Ignored by git. |
-| `MAX_FAILED_LOGINS` | `5` | Wrong PIN attempts per client before blocking until restart. |
-| `CLOUDFLARED_PATH` | empty | Optional. Enables Cloudflare Quick Tunnel if set. Leave empty to keep the app private in the tailnet. |
-| `CLOUDFLARED_ARGS` | `--no-autoupdate` | Extra arguments for `cloudflared`, if used. |
+| `APP_PIN` | required | 6-digit numeric PIN. The server refuses to start without it. |
+| `SERVER_HOST` | `127.0.0.1` | Local host. Never bind to `0.0.0.0`. |
+| `SERVER_PORT` | `8000` | Local port and Tailscale Serve target. |
+| `TAILSCALE_PATH` | empty | Path to the Tailscale CLI. Empty = autodetect. |
+| `QR_TTL_SECONDS` | `1800` | QR login token lifetime. |
+| `QR_OPEN_BROWSER` | `true` | Open the `/connect` page on start (the desktop app sets this to `false`). |
+| `AUDIT_LOG_FILE` | `audit.log` | Local audit log path. |
+| `MAX_FAILED_LOGINS` | `5` | Wrong PIN attempts before blocking until restart. |
 
-## Running Manually
+### Troubleshooting
 
-Backend:
-
-```powershell
-.\.venv\Scripts\activate
-python serve.py
-```
-
-Frontend development server:
-
-```powershell
-cd web
-$env:NEXT_PUBLIC_API_BASE="http://127.0.0.1:8000"
-npm run dev
-```
-
-Static production build:
-
-```powershell
-cd web
-npm run build
-```
-
-After the build, FastAPI serves `web/out` at the root path.
-
-## Security And Privacy
-
-This app has high privilege: it can see your screen and send mouse/keyboard input to the PC. Use it only with trusted devices and networks.
-
-Recommended practices:
-
-- Do not expose the FastAPI port directly to the public internet.
-- Prefer Tailscale Serve over public tunnels.
-- Use a unique, non-obvious PIN that is not reused elsewhere.
-- Do not share screenshots, logs, or the `.env` file.
-- Revoke unknown sessions from the sessions screen.
-- Restart the server if you suspect someone saw the QR code or PIN.
-- Before publishing to GitHub, run `git status --short` and verify that no sensitive files are included.
-
-Files that should stay out of git:
-
-- `.env` and real `.env.*` files.
-- `.gmail/`, `token.json`, `credentials.json`, `client_secret*.json`.
-- `audit.log` and other logs.
-- `.venv/`.
-- `web/node_modules/`, `web/.next/`, `web/out/`.
-- local screenshots and test screenshots.
-- private keys, certificates, and `.pem`, `.key`, `.p12` files.
-
-## Pre-Publish Checklist
-
-1. Confirm `.env` is ignored:
-
-```powershell
-git check-ignore -v .env
-```
-
-2. Confirm Gmail/OAuth tokens are ignored:
-
-```powershell
-git check-ignore -v .gmail/token.json
-```
-
-3. Search tracked files for secrets:
-
-```powershell
-git grep -n -i "password\|secret\|token\|api_key\|client_secret\|APP_PIN"
-```
-
-4. Review what will be committed:
-
-```powershell
-git status --short
-git diff --cached
-```
-
-5. Do not publish repository history if a real secret was ever committed. Rotate the secret and clean the history before making the repository public.
-
-## Troubleshooting
-
-### The QR Page Says The Private Connection Is Unavailable
-
-Check whether Tailscale is installed, signed in, and connected:
-
-```powershell
-tailscale status
-```
-
-If the command does not exist, install Tailscale or configure `TAILSCALE_PATH` in `.env`.
-
-### The Phone Cannot Open The Tailnet URL
-
-Confirm that the phone is signed in to the same tailnet and that Tailscale is connected. Also confirm that MagicDNS is enabled in the Tailscale admin console.
-
-### Mouse Or Keyboard Input Does Not Work In Some Windows
-
-On Windows, a normal process cannot control elevated windows. Run `start_remote_console.bat` and accept the UAC prompt to start as Administrator.
-
-### The Frontend Does Not Appear
-
-Generate the static build:
-
-```powershell
-cd web
-npm install
-npm run build
-cd ..
-python serve.py
-```
-
-### Port Already In Use
-
-Change `SERVER_PORT` in `.env` and restart the app. Tailscale Serve will use the new port on the next startup.
+- **"Tailscale offline" in the app** — open Tailscale, sign in, make sure it's
+  connected and that MagicDNS is enabled in the Tailscale admin console.
+- **Phone can't open the link** — confirm the phone is on the same tailnet and
+  connected.
+- **Input doesn't work in some windows (Windows)** — run Peek Remote as
+  administrator.
+- **Input/capture blocked (macOS)** — grant Screen Recording and Accessibility
+  permissions.
 
 ## License
 
-This project uses a custom non-commercial license. You may use, copy, modify, and distribute it for personal, educational, evaluation, or internal purposes, but you may not sell it, resell it, host it as a paid service, include it in a paid product, or otherwise monetize it without written permission.
-
-See [LICENSE](LICENSE).
+Custom non-commercial license — you may use, copy, modify, and distribute it for
+personal, educational, evaluation, or internal purposes, but not sell or
+monetize it without written permission. See [LICENSE](LICENSE).

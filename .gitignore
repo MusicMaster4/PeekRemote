@@ -28,6 +28,14 @@ build/
 dist/
 *.egg-info/
 
+# Electron build output
+dist-electron/
+
+# Keep the desktop app's build resources (icon, entitlements, icon script)
+# even though the generic `build/` rule above would otherwise ignore them.
+!desktop/build/
+!desktop/build/**
+
 # Node / Next.js
 node_modules/
 .next/

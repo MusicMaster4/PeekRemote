@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'"
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Peek Remote</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="grain" aria-hidden="true"></div>
+
+    <!-- Update banner -->
+    <div id="update-banner" class="banner" hidden>
+      <span id="update-banner-text">An update is available.</span>
+      <div class="banner-actions">
+        <button id="update-banner-action" class="btn btn-solid btn-sm">Download</button>
+        <button id="update-banner-dismiss" class="btn btn-ghost btn-sm">Later</button>
+      </div>
+    </div>
+
+    <header class="topbar">
+      <div class="brand">
+        <span class="logo" aria-hidden="true"></span>
+        <span class="wordmark">PEEK&nbsp;REMOTE</span>
+      </div>
+      <div class="topstatus">
+        <span id="status-dot" class="dot dot-idle"></span>
+        <span id="status-text" class="mono small muted">Starting…</span>
+      </div>
+    </header>
+
+    <main id="app">
+      <!-- ======================= ONBOARDING ======================= -->
+      <section id="onboarding" class="view" hidden>
+        <div class="steps mono small muted">
+          <span data-step-dot="0" class="step-dot is-active"></span>
+          <span data-step-dot="1" class="step-dot"></span>
+          <span data-step-dot="2" class="step-dot"></span>
+          <span data-step-dot="3" class="step-dot"></span>
+        </div>
+
+        <!-- Step 0: Welcome -->
+        <div class="step" data-step="0">
+          <h1 class="display">Welcome</h1>
+          <p class="lead">
+            Peek Remote lets you see and control this computer from your phone —
+            privately, over your own Tailscale network. No public links.
+          </p>
+          <ul class="feature-list">
+            <li>Live screen view + remote mouse &amp; keyboard</li>
+            <li>Private connection over Tailscale (WireGuard)</li>
+            <li>6-digit PIN, plus instant QR pairing</li>
+          </ul>
+          <p class="note mono small muted">
+            This guide takes about a minute. You can re-run it anytime.
+          </p>
+        </div>
+
+        <!-- Step 1: Tailscale -->
+        <div class="step" data-step="1" hidden>
+          <h1 class="display">Install Tailscale</h1>
+          <p class="lead">
+            Tailscale creates the private tunnel between this PC and your phone.
+            Install it on <strong>both</strong> devices and sign in to the same
+            account.
+          </p>
+          <div class="actions-row">
+            <button id="ts-download" class="btn btn-ghost btn-sm">Download Tailscale ↗</button>
+            <button id="ts-recheck" class="btn btn-ghost btn-sm">Re-check</button>
+          </div>
+          <div id="ts-state" class="status-card">
+            <div class="status-line"><span class="dot dot-idle"></span><span>Checking…</span></div>
+          </div>
+          <p class="note mono small muted">
+            Tip: enable <strong>MagicDNS</strong> in the Tailscale admin console
+            so your PC gets a clean name.
+          </p>
+        </div>
+
+        <!-- Step 2: PIN -->
+        <div class="step" data-step="2" hidden>
+          <h1 class="display">Set a PIN</h1>
+          <p class="lead">
+            Your phone uses this 6-digit PIN as a fallback login. QR pairing
+            works without typing it.
+          </p>
+          <input
+            id="pin-input"
+            class="pin"
+            inputmode="numeric"
+            maxlength="6"
+            autocomplete="off"
+            placeholder="● ● ● ● ● ●"
+            aria-label="6-digit PIN"
+          />
+          <p id="pin-error" class="note mono small danger" role="alert"></p>
+          <p class="note mono small muted">
+            Avoid obvious sequences like 123456 or 000000.
+          </p>
+        </div>
+
+        <!-- Step 3: Options + finish -->
+        <div class="step" data-step="3" hidden>
+          <h1 class="display">Almost done</h1>
+          <label class="toggle-row">
+            <span>
+              <span class="toggle-title">Start on login</span>
+              <span class="toggle-sub mono small muted"
+                >Launch Peek Remote (to the tray) when this computer boots.</span
+              >
+            </span>
+            <input type="checkbox" id="onb-autostart" class="switch" />
+          </label>
+          <div id="perm-note" class="status-card mono small muted"></div>
+        </div>
+
+        <div class="nav-row">
+          <button id="onb-back" class="btn btn-ghost" hidden>Back</button>
+          <button id="onb-next" class="btn btn-solid">Next</button>
+        </div>
+      </section>
+
+      <!-- ======================= PANEL ======================= -->
+      <section id="panel" class="view" hidden>
+        <div class="card connect-card">
+          <h2 class="card-title mono small muted">Pair your phone</h2>
+
+          <div id="qr-wrap" class="qr-wrap">
+            <div class="qr-placeholder mono small muted">Preparing…</div>
+          </div>
+
+          <div id="connect-meta">
+            <div class="url-box mono small" id="tailnet-url">—</div>
+            <div class="qr-sub mono small muted">
+              QR refreshes in <span id="qr-timer" class="tabnum">--:--</span>
+            </div>
+          </div>
+
+          <div id="connect-warning" class="status-card" hidden></div>
+
+          <div class="actions-row">
+            <button id="qr-refresh" class="btn btn-ghost btn-sm">New QR</button>
+            <button id="copy-url" class="btn btn-ghost btn-sm">Copy URL</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title mono small muted">Settings</h2>
+
+          <label class="toggle-row">
+            <span>
+              <span class="toggle-title">Start on login</span>
+              <span class="toggle-sub mono small muted">Run in the tray at startup.</span>
+            </span>
+            <input type="checkbox" id="set-autostart" class="switch" />
+          </label>
+
+          <label class="toggle-row">
+            <span>
+              <span class="toggle-title">Auto-check for updates</span>
+              <span class="toggle-sub mono small muted">Check GitHub on launch.</span>
+            </span>
+            <input type="checkbox" id="set-autoupdate" class="switch" />
+          </label>
+
+          <button id="rerun-setup" class="btn btn-ghost full">Re-run setup</button>
+        </div>
+
+        <div class="card">
+          <h2 class="card-title mono small muted">Updates</h2>
+          <div id="update-state" class="status-card mono small muted">Version —</div>
+          <div class="actions-row">
+            <button id="update-check" class="btn btn-ghost btn-sm">Check now</button>
+            <button id="update-action" class="btn btn-solid btn-sm" hidden>Download</button>
+          </div>
+        </div>
+
+        <details class="logs">
+          <summary class="mono small muted">Backend logs</summary>
+          <pre id="log-output" class="log-output mono small"></pre>
+        </details>
+
+        <footer class="footer mono small faint">
+          <span id="footer-version">Peek Remote</span>
+          <a href="#" id="repo-link">GitHub ↗</a>
+        </footer>
+      </section>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>

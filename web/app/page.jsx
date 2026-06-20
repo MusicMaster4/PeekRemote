@@ -23,7 +23,9 @@ export default function Page() {
   const [session, setSession] = useState(null);
 
   const refresh = () =>
-    getSession().then((s) => setSession(s ?? { authenticated: false, isOwner: false }));
+    getSession().then((s) =>
+      setSession(s ?? { authenticated: false, isOwner: false, os: "windows" })
+    );
 
   useEffect(() => {
     let active = true;
@@ -39,7 +41,8 @@ export default function Page() {
   return (
     <Console
       isOwner={session.isOwner}
-      onLogout={() => setSession({ authenticated: false, isOwner: false })}
+      os={session.os}
+      onLogout={() => setSession({ authenticated: false, isOwner: false, os: session.os })}
     />
   );
 }

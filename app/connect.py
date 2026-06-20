@@ -24,11 +24,24 @@ from .config import settings
 logger = logging.getLogger(__name__)
 
 _DEFAULT_WINDOWS_PATH = r"C:\Program Files\Tailscale\tailscale.exe"
+# Caminhos comuns do CLI do Tailscale fora do PATH em cada sistema.
+_DEFAULT_MAC_PATHS = (
+    "/Applications/Tailscale.app/Contents/MacOS/Tailscale",
+    "/usr/local/bin/tailscale",
+    "/opt/homebrew/bin/tailscale",
+)
+_DEFAULT_LINUX_PATHS = ("/usr/bin/tailscale", "/usr/local/bin/tailscale")
 
 
 def tailscale_exe() -> str | None:
-    """Resolve o executável do Tailscale (config explícita, Program Files, PATH)."""
-    candidates = [settings.tailscale_path, _DEFAULT_WINDOWS_PATH, "tailscale"]
+    """Resolve o executável do Tailscale (config explícita, caminhos padrão, PATH)."""
+    candidates = [
+        settings.tailscale_path,
+        _DEFAULT_WINDOWS_PATH,
+        *_DEFAULT_MAC_PATHS,
+        *_DEFAULT_LINUX_PATHS,
+        "tailscale",
+    ]
     for candidate in candidates:
         if not candidate:
             continue

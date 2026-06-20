@@ -1,0 +1,70 @@
+appId: com.peekremote.desktop
+productName: Peek Remote
+copyright: Copyright © 2026 MusicMaster4
+
+directories:
+  output: ../dist-electron
+  buildResources: build
+
+# Renderer + main process sources packed into the asar.
+files:
+  - src/**/*
+  - renderer/**/*
+  - package.json
+
+# The PyInstaller-built backend bundle is shipped alongside the app (unpacked),
+# so the end user never needs Python. Built by CI into ../dist/peek-backend.
+extraResources:
+  - from: ../dist/peek-backend
+    to: backend
+
+# Auto-update source: GitHub Releases. electron-updater reads latest.yml /
+# latest-mac.yml from the release matching the running version.
+publish:
+  provider: github
+  owner: MusicMaster4
+  repo: PeekRemote
+  releaseType: draft
+
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+  artifactName: ${productName}-${version}-Setup.${ext}
+  # No code signing by default; set CSC_LINK / CSC_KEY_PASSWORD secrets to sign.
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowElevation: true
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Peek Remote
+  installerIcon: build/icon.ico
+  uninstallerIcon: build/icon.ico
+  installerHeaderIcon: build/icon.ico
+  # Keep user config (in %APPDATA%) across updates — handled automatically.
+
+mac:
+  icon: build/icon.png
+  target:
+    - target: dmg
+      arch:
+        - x64
+        - arm64
+    - target: zip
+      arch:
+        - x64
+        - arm64
+  category: public.app-category.utilities
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  # macOS auto-update REQUIRES a signed app. Provide Apple signing/notarization
+  # secrets in CI to enable it; otherwise the DMG is unsigned (manual update).
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
