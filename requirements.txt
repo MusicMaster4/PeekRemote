@@ -6,3 +6,8 @@ mss==9.0.2
 pynput==1.7.7
 pydantic-settings==2.3.4
 segno==1.6.6
+
+# macOS only: pynput needs PyObjC to inject mouse/keyboard input. Installed (and
+# bundled by PyInstaller) only on macOS via the environment marker.
+pyobjc-framework-Quartz>=9.2 ; sys_platform == "darwin"
+pyobjc-framework-ApplicationServices>=9.2 ; sys_platform == "darwin"

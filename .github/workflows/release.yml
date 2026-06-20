@@ -1,16 +1,26 @@
 name: Build & Release
 
-# Self-versioning builds. Go to Actions → "Build & Release" → Run workflow.
-# Each run automatically computes the next version (latest release + 0.0.1 by
-# default), builds Windows + macOS, and publishes a GitHub Release with
-# auto-update metadata. No manual version editing needed.
+# Self-versioning builds.
+#
+# Runs automatically on every push to `main` (code changes), and can also be run
+# by hand from Actions → "Build & Release" → Run workflow. Each run computes the
+# next version (latest release + 0.0.1 by default), builds Windows + macOS, and
+# publishes a GitHub Release with auto-update metadata — no manual version edits.
 #
 #   • bump=patch (default) → 1.0.0 → 1.0.1 → 1.0.2 ...
-#   • bump=minor/major     → 1.0.x → 1.1.0 / 2.0.0
+#   • bump=minor/major (manual run only) → 1.0.x → 1.1.0 / 2.0.0
 #   • Need an exact version? Set it in desktop/package.json (higher than the
-#     latest release) and it will be used as-is for that run.
-#   • Uncheck "publish" for a test build (artifacts only, no release, no bump).
+#     latest release) and it is used as-is for that run.
+#   • Manual run with "publish" unchecked → test build (artifacts only, no bump).
 on:
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - "**.md"
+      - ".gitignore"
+      - "LICENSE"
   workflow_dispatch:
     inputs:
       bump:
@@ -30,7 +40,8 @@ permissions:
   contents: write
 
 jobs:
-  # Resolve the next version and tag it, so the increment persists for next time.
+  # Resolve the next version, tag it, and open a draft release up front so the
+  # platform build jobs can upload to it without racing each other.
   version:
     runs-on: ubuntu-latest
     outputs:
@@ -45,10 +56,11 @@ jobs:
       - id: calc
         shell: bash
         run: |
-          BUMP="${{ inputs.bump }}"
-          PUBLISH="${{ inputs.publish }}"
+          # Defaults make a push event behave like a normal patch release.
+          BUMP="${{ inputs.bump }}";    [ -z "$BUMP" ] && BUMP=patch
+          PUBLISH="${{ inputs.publish }}"; [ -z "$PUBLISH" ] && PUBLISH=true
+
           PKG=$(node -p "require('./desktop/package.json').version")
-          # Latest semver-shaped v* tag, if any.
           LATEST=$(git tag -l 'v*' | sed 's/^v//' \
             | grep -E '^[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
 
@@ -71,22 +83,26 @@ jobs:
             NEW="$(bump "$LATEST" "$BUMP")"
           fi
 
-          echo "version=$NEW"   >> "$GITHUB_OUTPUT"
-          echo "tag=v$NEW"      >> "$GITHUB_OUTPUT"
+          echo "version=$NEW"     >> "$GITHUB_OUTPUT"
+          echo "tag=v$NEW"        >> "$GITHUB_OUTPUT"
           echo "publish=$PUBLISH" >> "$GITHUB_OUTPUT"
-          echo "Resolved: v$NEW  (latest tag: ${LATEST:-none}, pkg: $PKG, bump: $BUMP, publish: $PUBLISH)"
+          echo "Resolved: v$NEW (latest tag: ${LATEST:-none}, pkg: $PKG, bump: $BUMP, publish: $PUBLISH)"
 
-      - name: Tag the new version
+      - name: Tag version and open draft release
         if: steps.calc.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           TAG="${{ steps.calc.outputs.tag }}"
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; reusing it."
-          else
+          if ! git rev-parse "$TAG" >/dev/null 2>&1; then
             git tag "$TAG"
             git push origin "$TAG"
+          fi
+          if ! gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$GITHUB_REPOSITORY" \
+              --draft --title "Peek Remote $TAG" --generate-notes
           fi
 
   build:
