@@ -48,17 +48,7 @@ function setupUpdater(getWindow) {
   });
 
   autoUpdater.on("error", (err) => {
-    const message = messageOf(err);
-    if (availableInfo && (status.state === "available" || status.state === "downloading")) {
-      emitStatus({
-        state: "available",
-        version: availableInfo.version,
-        notes: availableInfo.releaseNotes,
-        error: message,
-      });
-      return;
-    }
-    emitStatus({ state: "error", message });
+    emitStatus({ state: "error", message: messageOf(err) });
   });
 
   autoUpdater.on("download-progress", (p) => {

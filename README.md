@@ -1,5 +1,9 @@
 # Peek Remote
 
+<p align="center">
+  <img src="docs/readme/peek-remote-icon.png" alt="Peek Remote app icon" width="96" />
+</p>
+
 See and control your computer from your phone — privately, over your own
 Tailscale network. No public links, no accounts to create, no cloud in the
 middle. Open the app, scan a QR code with your phone, and you're in.
@@ -13,7 +17,9 @@ technical.**
 
 ➡️ **[Download from the Releases page](https://github.com/MusicMaster4/PeekRemote/releases/latest)**
 
-- **Windows** — download `Peek-Remote-...-Setup.exe` and run it.
+- **Windows** — download `Peek-Remote-...-Setup.exe` and run it. The installer
+  asks for administrator approval once so Peek Remote can later start elevated
+  without asking every time.
 - **macOS (Apple Silicon)** — download `Peek-Remote-...-arm64.dmg`, open it, and
   drag the app to Applications. The build is currently unsigned, so the first
   time you open it, **right-click the app → Open** (or allow it in System
@@ -33,6 +39,36 @@ tunnel between your computer and your phone. It's free for personal use.
 
 That's it — the in-app setup guide walks you through this the first time you open
 Peek Remote.
+
+---
+
+## App walkthrough
+
+Peek Remote guides you from first launch to phone pairing inside the desktop app.
+
+### 1. Welcome
+
+<p align="center">
+  <img src="docs/readme/01-welcome.png" alt="Peek Remote welcome screen" width="760" />
+</p>
+
+### 2. Check Tailscale
+
+<p align="center">
+  <img src="docs/readme/02-tailscale.png" alt="Peek Remote Tailscale setup step" width="760" />
+</p>
+
+### 3. Set a PIN
+
+<p align="center">
+  <img src="docs/readme/03-pin.png" alt="Peek Remote PIN setup step" width="760" />
+</p>
+
+### 4. Pair your phone
+
+<p align="center">
+  <img src="docs/readme/04-dashboard.png" alt="Peek Remote QR pairing and settings screen" width="760" />
+</p>
 
 ---
 
@@ -102,8 +138,9 @@ like a key to your computer:
 - If you think someone saw your QR or PIN, reopen the app (a new key is created)
   or remove unknown sessions from the sessions screen on your phone.
 
-> **Windows tip:** to control administrator windows (like Task Manager), right
-> click Peek Remote and choose **Run as administrator**.
+> **Windows tip:** the installed app creates elevated Task Scheduler entries
+> during setup. That lets Peek Remote control administrator windows (like Task
+> Manager) without a UAC prompt every time it opens.
 >
 > **macOS tip:** the first time you control your Mac, approve **Screen
 > Recording** and **Accessibility** for Peek Remote in System Settings → Privacy
@@ -230,8 +267,9 @@ the environment or a `.env` file:
   connected and that MagicDNS is enabled in the Tailscale admin console.
 - **Phone can't open the link** — confirm the phone is on the same tailnet and
   connected.
-- **Input doesn't work in some windows (Windows)** — run Peek Remote as
-  administrator.
+- **Input doesn't work in some windows (Windows)** — use the installed Windows
+  app, not `npm start`; the installer creates the elevated launch task needed to
+  control administrator windows.
 - **Input/capture blocked (macOS)** — grant Screen Recording and Accessibility
   permissions.
 

@@ -28,6 +28,7 @@ publish:
 
 win:
   icon: build/icon.ico
+  requestedExecutionLevel: asInvoker
   target:
     - nsis
   artifactName: ${productName}-${version}-Setup.${ext}
@@ -35,10 +36,15 @@ win:
 
 nsis:
   oneClick: false
-  perMachine: false
+  # The installer needs one admin approval so it can create elevated scheduled
+  # tasks. Daily app launches use those tasks and do not show a UAC prompt.
+  perMachine: true
   allowElevation: true
   allowToChangeInstallationDirectory: true
-  createDesktopShortcut: true
+  include: build/installer.nsh
+  # `always` re-creates the desktop shortcut even on updates / if the user
+  # deleted it, so it's reliably present after install.
+  createDesktopShortcut: always
   createStartMenuShortcut: true
   shortcutName: Peek Remote
   installerIcon: build/icon.ico

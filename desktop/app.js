@@ -105,14 +105,6 @@ function renderStep() {
   $("#onb-back").hidden = step === 0;
   $("#onb-next").textContent = step === 3 ? "Finish" : "Next";
 
-  // Re-trigger the one-shot enter animation on the now-visible step.
-  const active = $(`.step[data-step="${step}"]`);
-  if (active) {
-    active.classList.remove("step-anim");
-    void active.offsetWidth; // reflow so the animation replays
-    active.classList.add("step-anim");
-  }
-
   if (step === 1) checkTailscale();
   if (step === 2) setTimeout(() => $("#pin-input").focus(), 50);
   if (step === 3) renderPermNote();
@@ -396,11 +388,7 @@ function clearUpdateActions() {
 
 function handleUpdateStatus(s) {
   state.updateState = s.state;
-  if (s.version) {
-    state.updateVersion = s.version;
-  } else if (s.state === "none" || s.state === "error") {
-    state.updateVersion = "";
-  }
+  state.updateVersion = s.version || "";
 
   switch (s.state) {
     case "checking":

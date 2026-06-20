@@ -1,7 +1,7 @@
 {
   "name": "peek-remote-desktop",
   "productName": "Peek Remote",
-  "version": "1.0.0",
+  "version": "1.0.3",
   "description": "Peek Remote — private remote screen access over Tailscale.",
   "author": {
     "name": "MusicMaster4"

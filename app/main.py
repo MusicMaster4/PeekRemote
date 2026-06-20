@@ -9,6 +9,7 @@ import platform
 import re
 import secrets
 import shlex
+import subprocess
 import sys
 import time
 import uuid
@@ -71,6 +72,18 @@ def _host_os() -> str:
 
 
 HOST_OS = _host_os()
+
+
+def _hidden_subprocess_kwargs() -> dict:
+    if platform.system() != "Windows":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
 
 AUTH_COOKIE_NAME = "remote_console_auth"
 SESSION_SECONDS = 12 * 60 * 60
@@ -469,6 +482,7 @@ async def _start_cloudflared() -> None:
             *command,
             stdout=PIPE,
             stderr=PIPE,
+            **_hidden_subprocess_kwargs(),
         )
     except FileNotFoundError:
         logger.error("cloudflared não encontrado. Ajuste CLOUDFLARED_PATH ou instale o utilitário.")

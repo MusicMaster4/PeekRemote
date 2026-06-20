@@ -33,6 +33,18 @@ _DEFAULT_MAC_PATHS = (
 _DEFAULT_LINUX_PATHS = ("/usr/bin/tailscale", "/usr/local/bin/tailscale")
 
 
+def _hidden_subprocess_kwargs() -> dict:
+    if os.name != "nt":
+        return {}
+    startupinfo = subprocess.STARTUPINFO()
+    startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+    startupinfo.wShowWindow = subprocess.SW_HIDE
+    return {
+        "startupinfo": startupinfo,
+        "creationflags": subprocess.CREATE_NO_WINDOW,
+    }
+
+
 def tailscale_exe() -> str | None:
     """Resolve o executável do Tailscale (config explícita, caminhos padrão, PATH)."""
     candidates = [
@@ -67,6 +79,7 @@ def _run(args: list[str], timeout: float = 10.0) -> subprocess.CompletedProcess 
             text=True,
             timeout=timeout,
             check=False,
+            **_hidden_subprocess_kwargs(),
         )
     except (OSError, subprocess.SubprocessError) as exc:
         logger.warning("Falha ao executar tailscale %s: %s", " ".join(args), exc)
