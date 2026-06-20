@@ -13,9 +13,11 @@ technical.**
 
 ➡️ **[Download from the Releases page](https://github.com/MusicMaster4/PeekRemote/releases/latest)**
 
-- **Windows** — download the `Peek Remote ... Setup.exe` and run it.
-- **macOS** — download the `Peek Remote ... .dmg`, open it, and drag the app to
-  Applications.
+- **Windows** — download `Peek-Remote-...-Setup.exe` and run it.
+- **macOS (Apple Silicon)** — download `Peek-Remote-...-arm64.dmg`, open it, and
+  drag the app to Applications. The build is currently unsigned, so the first
+  time you open it, **right-click the app → Open** (or allow it in System
+  Settings → Privacy & Security).
 
 The app updates itself from inside (see [Updates](#updates)), so you only ever
 download it once.
