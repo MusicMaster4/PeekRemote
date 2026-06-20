@@ -1,9 +1,9 @@
 /* ============================================================
    Peek Remote — desktop control panel
    "Chapa Noir" palette: true blacks, warm ivory ink, restrained
-   engraved controls. Landscape (desktop) layout. Transitions are
-   one-shot only — no looping animations, so idle CPU stays ~0,
-   matching the project's performance rule.
+   engraved controls. Landscape (desktop) layout. Every animation
+   is one-shot (entrances/transitions only) — nothing loops, so
+   idle CPU stays ~0, matching the project's performance rule.
    ============================================================ */
 
 :root {
@@ -27,6 +27,7 @@
   --mono: ui-monospace, "Cascadia Code", "Consolas", "SF Mono", monospace;
 
   --topbar-h: 50px;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
 
   color-scheme: dark;
 }
@@ -100,42 +101,15 @@ body::before {
   height: var(--topbar-h);
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  padding: 0 20px;
+  justify-content: flex-end;
+  padding: 0 18px;
   border-bottom: 1px solid var(--line);
   background: var(--bg-soft);
-  -webkit-app-region: drag; /* feels like a native title strip */
+  -webkit-app-region: drag;
 }
 .topbar button,
 .topbar .topstatus {
   -webkit-app-region: no-drag;
-}
-.brand {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.logo {
-  width: 16px;
-  height: 16px;
-  border-radius: 50%;
-  border: 2px solid var(--ink);
-  position: relative;
-}
-.logo::after {
-  content: "";
-  position: absolute;
-  inset: 3px;
-  border-radius: 50%;
-  background: var(--ink);
-  opacity: 0.85;
-}
-.wordmark {
-  font-family: var(--display);
-  font-weight: 900;
-  letter-spacing: 0.18em;
-  font-size: 0.82rem;
-  color: var(--ink);
 }
 .topstatus {
   display: flex;
@@ -160,7 +134,7 @@ body::before {
   background: var(--danger);
 }
 
-/* ---- App shell ---- */
+/* ---- App shell + view transitions ---- */
 main#app {
   height: calc(100% - var(--topbar-h));
   position: relative;
@@ -169,7 +143,7 @@ main#app {
   position: absolute;
   inset: 0;
   display: flex;
-  animation: viewIn 280ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+  animation: viewIn 320ms var(--ease) both;
 }
 .view[hidden] {
   display: none;
@@ -177,18 +151,34 @@ main#app {
 @keyframes viewIn {
   from {
     opacity: 0;
-    transform: translateY(8px);
+    transform: translateY(10px) scale(0.992);
   }
   to {
     opacity: 1;
     transform: none;
   }
 }
+/* Onboarding → panel hand-off (plays on the outgoing onboarding view). */
+.view-leaving {
+  animation: viewLeave 360ms var(--ease) both !important;
+}
+@keyframes viewLeave {
+  from {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.03);
+    filter: blur(6px);
+  }
+}
 
 h1.display {
   font-family: var(--display);
   font-weight: 900;
-  font-size: 2rem;
+  font-size: 2.05rem;
   letter-spacing: -0.01em;
   text-transform: uppercase;
   color: var(--ink);
@@ -200,11 +190,11 @@ h1.display {
   max-width: 46ch;
 }
 .note {
-  margin: 10px 0 0;
+  margin: 12px 0 0;
 }
 
 /* ============================================================
-   ONBOARDING — two pane: left rail + right step pane
+   ONBOARDING — left rail + right step pane
    ============================================================ */
 .onboarding {
   flex-direction: row;
@@ -212,57 +202,32 @@ h1.display {
 .rail {
   width: 280px;
   flex: none;
-  display: flex;
-  flex-direction: column;
-  padding: 34px 28px;
+  display: grid;
+  grid-template-rows: 1fr auto;
+  padding: 30px 26px;
   background: linear-gradient(180deg, var(--bg-soft), var(--bg));
   border-right: 1px solid var(--line);
-}
-.rail-mark {
-  width: 46px;
-  height: 46px;
-  border-radius: 12px;
-  border: 1px solid var(--line-strong);
-  background: radial-gradient(120% 120% at 30% 20%, #1a1a1f, #0b0b0d);
-  position: relative;
-  margin-bottom: 36px;
-}
-.rail-mark::before {
-  /* eye/aperture echo of the app icon */
-  content: "";
-  position: absolute;
-  inset: 13px;
-  border-radius: 50%;
-  border: 2px solid var(--ink);
-  opacity: 0.92;
-}
-.rail-mark::after {
-  content: "";
-  position: absolute;
-  inset: 19px;
-  border-radius: 50%;
-  background: var(--ink);
-  opacity: 0.9;
 }
 .rail-steps {
   list-style: none;
   margin: 0;
   padding: 0;
+  align-self: center; /* center the step list now that there's no header */
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 .rail-step {
   display: flex;
   align-items: center;
-  gap: 12px;
-  padding: 9px 0;
+  gap: 13px;
+  padding: 10px 0;
 }
 .rail-label {
   font-size: 0.86rem;
   color: var(--faint);
   letter-spacing: 0.02em;
-  transition: color 0.25s ease;
+  transition: color 0.3s var(--ease);
 }
 .step-dot {
   width: 9px;
@@ -271,7 +236,8 @@ h1.display {
   background: var(--panel-solid);
   border: 1px solid var(--line-strong);
   flex: none;
-  transition: background 0.25s ease, border-color 0.25s ease, box-shadow 0.25s ease;
+  transition: background 0.3s var(--ease), border-color 0.3s var(--ease),
+    box-shadow 0.3s var(--ease);
 }
 .step-dot.is-active {
   background: var(--ink);
@@ -282,8 +248,9 @@ h1.display {
   color: var(--ink);
 }
 .rail-foot {
-  margin-top: auto;
+  align-self: end;
   padding-top: 18px;
+  margin: 0;
 }
 
 /* Right pane */
@@ -291,7 +258,7 @@ h1.display {
   flex: 1;
   display: flex;
   flex-direction: column;
-  padding: 40px 48px 28px;
+  padding: 44px 56px 30px;
   min-width: 0;
 }
 .pane-body {
@@ -307,14 +274,124 @@ h1.display {
 .step[hidden] {
   display: none;
 }
-/* one-shot enter animation, re-triggered by JS on step change */
-.step-anim {
-  animation: stepIn 300ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+
+/* Directional one-shot enter animation, re-triggered by JS on step change. */
+.step-anim-fwd {
+  animation: stepFwd 360ms var(--ease) both;
 }
-@keyframes stepIn {
+.step-anim-back {
+  animation: stepBack 360ms var(--ease) both;
+}
+@keyframes stepFwd {
   from {
     opacity: 0;
-    transform: translateX(16px);
+    transform: translateX(34px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+@keyframes stepBack {
+  from {
+    opacity: 0;
+    transform: translateX(-34px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
+}
+
+/* ---- Welcome cinematic intro (one-shot, triggered via .intro) ---- */
+.welcome {
+  overflow: visible;
+}
+.welcome-iris {
+  position: absolute;
+  top: -56px;
+  right: -10px;
+  width: 200px;
+  height: 200px;
+  pointer-events: none;
+  border-radius: 50%;
+  opacity: 0;
+  background:
+    radial-gradient(circle, transparent 38%, rgba(247, 248, 250, 0.05) 39%, transparent 42%),
+    radial-gradient(circle, transparent 54%, rgba(247, 248, 250, 0.04) 55%, transparent 58%);
+  border: 1px solid var(--line);
+}
+.welcome-title {
+  position: relative;
+}
+.welcome-title .wl {
+  display: inline-block;
+  white-space: pre;
+}
+.welcome-lead,
+.welcome-chips {
+  opacity: 0;
+}
+
+.welcome.intro .welcome-iris {
+  animation: irisOpen 900ms var(--ease) 60ms both;
+}
+.welcome.intro .welcome-title .wl {
+  animation: letterRise 560ms var(--ease) both;
+  animation-delay: calc(120ms + var(--i) * 45ms);
+}
+.welcome.intro .welcome-lead {
+  animation: riseFade 560ms var(--ease) 480ms both;
+}
+.welcome.intro .welcome-chips {
+  animation: riseFade 560ms var(--ease) 600ms both;
+}
+.welcome.intro .welcome-chips li {
+  opacity: 0;
+  animation: chipPop 460ms var(--ease) both;
+  animation-delay: calc(680ms + var(--i) * 90ms);
+}
+@keyframes irisOpen {
+  0% {
+    opacity: 0;
+    transform: scale(0.4) rotate(-25deg);
+  }
+  60% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0.9;
+    transform: scale(1) rotate(0);
+  }
+}
+@keyframes letterRise {
+  from {
+    opacity: 0;
+    transform: translateY(0.5em) rotateX(40deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes riseFade {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes chipPop {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.96);
   }
   to {
     opacity: 1;
@@ -322,7 +399,7 @@ h1.display {
   }
 }
 
-/* welcome chips replace the old bullet list */
+/* welcome chips */
 .chips {
   list-style: none;
   margin: 4px 0 0;
@@ -342,47 +419,87 @@ h1.display {
 }
 
 /* ============================================================
-   PANEL — two columns
+   PANEL — centered two-card stage + footer bar
    ============================================================ */
 .panel {
-  flex-direction: row;
-  gap: 18px;
-  padding: 22px 24px;
+  flex-direction: column;
+  padding: 18px 28px 10px;
   overflow: auto;
 }
-.col {
-  min-width: 0;
-}
-.col-pair {
-  width: 360px;
-  flex: none;
-}
-.col-settings {
+.panel-stage {
   flex: 1;
   display: flex;
+  align-items: center; /* vertically center the card row in the window */
+  justify-content: center;
+  min-height: 0;
+  padding: 10px 0 16px;
+}
+.panel-grid {
+  display: grid;
+  grid-template-columns: 372px minmax(0, 1fr);
+  gap: 22px;
+  align-items: stretch; /* the two cards share one height */
+  width: 100%;
+  max-width: 920px;
+}
+.panel-grid .card {
+  margin: 0;
+}
+.side-card {
+  display: flex;
   flex-direction: column;
+  justify-content: center; /* balance settings/updates against the QR */
+}
+.side-divider {
+  height: 1px;
+  background: var(--line);
+  margin: 22px 0;
+}
+
+/* finish → panel: cards + footer rise once */
+.panel.panel-enter .card {
+  opacity: 0;
+  animation: riseFade 520ms var(--ease) both;
+}
+.panel.panel-enter .connect-card {
+  animation-delay: 120ms;
+}
+.panel.panel-enter .side-card {
+  animation-delay: 220ms;
+}
+.panel.panel-enter .footer {
+  opacity: 0;
+  animation: riseFade 520ms var(--ease) 320ms both;
 }
 
 /* ---- Cards ---- */
 .card {
-  background: var(--panel);
+  background: linear-gradient(180deg, rgba(247, 248, 250, 0.028), rgba(247, 248, 250, 0.012));
   border: 1px solid var(--line);
-  border-radius: 6px;
-  padding: 18px;
+  border-radius: 12px;
+  padding: 22px;
   margin-bottom: 16px;
-}
-.col-pair .card {
-  margin-bottom: 0;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
 }
 .card-title {
   text-transform: uppercase;
   letter-spacing: 0.2em;
   margin: 0 0 14px;
 }
+.card-head {
+  margin-bottom: 12px;
+}
+.card-head .card-title {
+  margin: 0;
+}
+.card-hint {
+  display: block;
+  margin-top: 4px;
+}
 .status-card {
   background: var(--panel-strong);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 5px;
   padding: 10px 12px;
   margin-top: 10px;
 }
@@ -399,13 +516,14 @@ h1.display {
   text-transform: uppercase;
   letter-spacing: 0.16em;
   font-size: 0.72rem;
-  border-radius: 4px;
+  border-radius: 5px;
   padding: 11px 16px;
   cursor: pointer;
   border: 1px solid var(--line-strong);
   background: transparent;
   color: var(--text);
-  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease;
+  transition: transform 0.08s ease, background 0.15s ease, border-color 0.15s ease,
+    box-shadow 0.15s ease;
 }
 .btn:hover {
   background: var(--panel-strong);
@@ -426,6 +544,7 @@ h1.display {
 .btn-solid:hover {
   background: #ffffff;
   transform: translateY(-1px);
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
 }
 .btn-ghost {
   background: var(--panel);
@@ -445,6 +564,11 @@ h1.display {
   margin-top: 14px;
   flex-wrap: wrap;
 }
+/* QR card: New QR on the left, Copy URL on the right */
+.connect-card .actions-row {
+  justify-content: space-between;
+  flex-wrap: nowrap;
+}
 .nav-row {
   display: flex;
   gap: 10px;
@@ -452,32 +576,140 @@ h1.display {
   margin-top: 20px;
 }
 .nav-row .btn {
-  min-width: 120px;
+  min-width: 124px;
 }
 #onb-back {
   margin-right: auto;
 }
 
-/* ---- PIN ---- */
-.pin {
-  width: 100%;
-  max-width: 360px;
-  text-align: center;
-  letter-spacing: 0.5em;
+/* ---- PIN field (custom masked cells + reveal eye) ---- */
+.pin-field {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  max-width: 420px;
+  margin: 6px 0 2px;
+}
+.pin-box {
+  position: relative;
+  flex: 1;
+}
+.pin-cells {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 8px;
+}
+.pin-cell {
+  height: 58px;
+  display: grid;
+  place-items: center;
   font-family: var(--mono);
-  font-size: 1.7rem;
-  padding: 16px 10px;
+  font-size: 1.5rem;
+  color: var(--ink);
   background: var(--panel-solid);
   border: 1px solid var(--line-strong);
-  border-radius: 6px;
-  color: var(--ink);
-  outline: none;
-  margin: 4px 0;
-  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+  border-radius: 8px;
+  transition: border-color 0.18s ease, box-shadow 0.18s ease, transform 0.18s ease,
+    background 0.18s ease;
 }
-.pin:focus {
+.pin-cell.is-filled {
+  border-color: rgba(247, 248, 250, 0.4);
+  background: #16161a;
+}
+.pin-cell.is-reveal {
+  transform: translateY(-1px);
+}
+/* the cell the caret is on, while focused */
+.pin-box:focus-within .pin-cell.is-next {
   border-color: var(--ink);
   box-shadow: 0 0 0 4px rgba(247, 248, 250, 0.06);
+}
+.pin-input {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  caret-color: transparent;
+  font-size: 1px;
+  letter-spacing: 1em;
+  text-indent: -9999px;
+  cursor: text;
+}
+.pin-eye {
+  flex: none;
+  width: 50px;
+  height: 58px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--panel);
+  color: var(--silver);
+  cursor: pointer;
+  transition: color 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+}
+.pin-eye:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+  background: var(--panel-strong);
+}
+.pin-eye .icon-eye-off {
+  display: none;
+}
+.pin-eye.is-revealed .icon-eye {
+  display: none;
+}
+.pin-eye.is-revealed .icon-eye-off {
+  display: block;
+}
+
+/* ---- Segmented choice (start-on-boot) ---- */
+.segmented {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  max-width: 460px;
+  margin: 2px 0 4px;
+}
+.seg {
+  font-family: var(--sans);
+  font-size: 0.9rem;
+  font-weight: 600;
+  text-align: left;
+  padding: 16px 16px;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--panel);
+  color: var(--silver);
+  cursor: pointer;
+  position: relative;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease,
+    box-shadow 0.18s ease, transform 0.08s ease;
+}
+.seg:hover {
+  border-color: var(--ink);
+  color: var(--ink);
+}
+.seg:active {
+  transform: translateY(1px);
+}
+.seg.is-selected {
+  border-color: var(--ink);
+  color: var(--ink);
+  background: var(--panel-strong);
+  box-shadow: 0 0 0 1px var(--ink), 0 6px 18px rgba(0, 0, 0, 0.4);
+}
+.seg.is-selected::after {
+  content: "✓";
+  position: absolute;
+  top: 10px;
+  right: 12px;
+  font-size: 0.8rem;
+  color: var(--ink);
 }
 
 /* ---- Toggles ---- */
@@ -539,14 +771,15 @@ h1.display {
   text-align: center;
 }
 .qr-wrap {
-  width: 240px;
-  height: 240px;
-  margin: 4px auto 14px;
+  width: 252px;
+  height: 252px;
+  margin: 4px auto 16px;
   background: #ffffff;
-  border-radius: 10px;
-  padding: 12px;
+  border-radius: 14px;
+  padding: 13px;
   display: grid;
   place-items: center;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
 }
 .qr-wrap svg {
   width: 100%;
@@ -558,10 +791,12 @@ h1.display {
   color: #555;
 }
 .url-box {
-  word-break: break-all;
+  white-space: nowrap; /* keep the whole link on one line */
+  overflow: hidden;
+  text-align: center;
   background: var(--panel-strong);
   border: 1px solid var(--line);
-  border-radius: 4px;
+  border-radius: 5px;
   padding: 8px 10px;
   color: var(--silver);
   user-select: text;
@@ -581,7 +816,6 @@ h1.display {
   border-bottom: 1px solid var(--line-strong);
   animation: viewIn 260ms ease both;
 }
-/* respect the hidden attribute (a display value would otherwise override it) */
 .banner[hidden] {
   display: none;
 }
@@ -590,34 +824,12 @@ h1.display {
   gap: 8px;
 }
 
-/* ---- Logs ---- */
-.logs {
-  margin: 0 0 14px;
-}
-.logs summary {
-  cursor: pointer;
-  text-transform: uppercase;
-  letter-spacing: 0.2em;
-  padding: 6px 0;
-}
-.log-output {
-  max-height: 150px;
-  overflow: auto;
-  background: var(--panel-solid);
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  padding: 10px;
-  color: var(--silver);
-  white-space: pre-wrap;
-  user-select: text;
-}
-
 .footer {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: auto;
-  padding-top: 8px;
+  padding: 12px 4px 4px;
+  border-top: 1px solid var(--line);
 }
 .footer a {
   color: var(--muted);
@@ -631,12 +843,18 @@ a {
   color: var(--silver);
 }
 
-/* Narrower windows: stack the panel columns. */
-@media (max-width: 720px) {
-  .panel {
-    flex-direction: column;
+/* Reduced-motion: honor the OS setting (and keep idle work nil). */
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-delay: 0ms !important;
   }
-  .col-pair {
-    width: 100%;
+}
+
+/* Narrower windows: stack the two panel cards. */
+@media (max-width: 720px) {
+  .panel-grid {
+    grid-template-columns: minmax(0, 1fr);
+    max-width: 380px;
   }
 }

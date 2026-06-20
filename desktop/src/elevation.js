@@ -79,7 +79,7 @@ function configureAutoStart(enabled, exePath = process.execPath) {
         if (err) {
           resolve({
             ok: false,
-            message: (stderr || stdout || err.message || "Task Scheduler failed.").trim(),
+            message: cleanPowerShellError(stderr || stdout || err.message),
           });
           return;
         }
@@ -111,6 +111,33 @@ if (${enabledLiteral}) {
 
 function psString(value) {
   return `'${String(value).replace(/'/g, "''")}'`;
+}
+
+// PowerShell writes its error/progress streams as CLIXML when stderr is
+// redirected, which is unreadable in a UI. Pull out the human text if we can,
+// otherwise fall back to a plain sentence. Never return raw CLIXML.
+function cleanPowerShellError(raw) {
+  const s = String(raw || "").trim();
+  if (!s) return "Windows could not configure start-on-boot.";
+  if (s.includes("CLIXML") || s.includes("<Objs")) {
+    const errors = [...s.matchAll(/<S S="Error">([^<]*)<\/S>/g)]
+      .map((m) => decodeClixml(m[1]))
+      .join(" ")
+      .trim();
+    return errors || "Windows could not configure start-on-boot.";
+  }
+  return s;
+}
+
+function decodeClixml(text) {
+  return String(text)
+    .replace(/_x000D_/g, "")
+    .replace(/_x000A_/g, " ")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&amp;/g, "&")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function powershellPath() {

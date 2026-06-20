@@ -17,6 +17,11 @@ const state = {
   updateState: "none",
   updateVersion: "",
   elevation: { usesElevatedTasks: false, isElevatedTaskLaunch: false },
+  // PIN field
+  pinRevealAll: false,
+  pinRevealIndex: -1,
+  pinRevealTimer: null,
+  pinPrevLen: 0,
 };
 
 // ---------------------------------------------------------------- bootstrap
@@ -27,7 +32,7 @@ async function boot() {
   state.backendRunning = info.backend.running;
   state.elevation = info.elevation || state.elevation;
 
-  $("#footer-version").textContent = `Peek Remote v${info.version}`;
+  $("#footer-version").textContent = `v${info.version}`;
   $("#update-state").textContent = `Current version: v${info.version}`;
 
   // Settings reflect saved config
@@ -93,10 +98,10 @@ function showView(id) {
 function showOnboarding() {
   state.onboardStep = 0;
   showView("onboarding");
-  renderStep();
+  renderStep("fwd");
 }
 
-function renderStep() {
+function renderStep(direction = "fwd") {
   const step = state.onboardStep;
   $$(".step").forEach((el) => (el.hidden = Number(el.dataset.step) !== step));
   $$("[data-step-dot]").forEach((d) =>
@@ -105,40 +110,45 @@ function renderStep() {
   $("#onb-back").hidden = step === 0;
   $("#onb-next").textContent = step === 3 ? "Finish" : "Next";
 
-  // Re-trigger the one-shot enter animation on the now-visible step.
+  // Re-trigger the directional one-shot enter animation on the visible step.
   const active = $(`.step[data-step="${step}"]`);
   if (active) {
-    active.classList.remove("step-anim");
+    active.classList.remove("step-anim-fwd", "step-anim-back");
     void active.offsetWidth; // reflow so the animation replays
-    active.classList.add("step-anim");
+    active.classList.add(direction === "back" ? "step-anim-back" : "step-anim-fwd");
   }
 
+  if (step === 0) playWelcomeIntro();
   if (step === 1) checkTailscale();
-  if (step === 2) setTimeout(() => $("#pin-input").focus(), 50);
-  if (step === 3) renderPermNote();
+  if (step === 2) {
+    renderPinCells();
+    setTimeout(() => $("#pin-input").focus(), 60);
+  }
 }
 
-function renderPermNote() {
-  const el = $("#perm-note");
-  if (state.platform === "darwin") {
-    el.innerHTML =
-      "On macOS, the first time you control this Mac you'll be asked to grant " +
-      "<strong>Screen Recording</strong> and <strong>Accessibility</strong> " +
-      "permissions to Peek Remote. Approve both in System Settings → Privacy &amp; Security.";
-  } else if (state.platform === "win32") {
-    if (state.elevation.usesElevatedTasks) {
-      el.innerHTML =
-        "On Windows, the installer configures Peek Remote to start elevated " +
-        "through Task Scheduler. You approve administrator access once during install, " +
-        "not every time the app opens.";
-    } else {
-      el.innerHTML =
-        "On Windows, controlling administrator windows requires running Peek Remote " +
-        "as administrator.";
-    }
-  } else {
-    el.textContent = "You're all set.";
+// Cinematic welcome entrance: split the title into letters for a staggered
+// rise, then let the iris / lead / chips cascade in. One-shot only.
+function playWelcomeIntro() {
+  const title = $("#welcome-title");
+  if (title && !title.dataset.split) {
+    const text = title.textContent;
+    title.textContent = "";
+    [...text].forEach((ch, i) => {
+      const span = document.createElement("span");
+      span.className = "wl";
+      span.textContent = ch;
+      span.style.setProperty("--i", i);
+      title.appendChild(span);
+    });
+    title.dataset.split = "1";
   }
+  $$(".welcome-chips li").forEach((li, i) => li.style.setProperty("--i", i));
+
+  const welcome = $(".welcome");
+  if (!welcome) return;
+  welcome.classList.remove("intro");
+  void welcome.offsetWidth;
+  welcome.classList.add("intro");
 }
 
 async function checkTailscale() {
@@ -172,30 +182,72 @@ function validatePin(pin) {
   return "";
 }
 
+// ---- PIN field (custom masked cells) -------------------------------------
+function renderPinCells() {
+  const val = $("#pin-input").value;
+  $$("#pin-cells .pin-cell").forEach((cell, i) => {
+    const filled = i < val.length;
+    const reveal = filled && (state.pinRevealAll || i === state.pinRevealIndex);
+    cell.textContent = filled ? (reveal ? val[i] : "●") : "";
+    cell.classList.toggle("is-filled", filled);
+    cell.classList.toggle("is-reveal", reveal);
+    cell.classList.toggle("is-next", i === val.length);
+  });
+}
+
+function resetPinField() {
+  $("#pin-input").value = "";
+  state.pinPrevLen = 0;
+  state.pinRevealIndex = -1;
+  clearTimeout(state.pinRevealTimer);
+  renderPinCells();
+}
+
+// ---- Start-on-boot segmented choice --------------------------------------
+function getAutoStartChoice() {
+  const sel = $("#autostart-choice .seg.is-selected");
+  return sel ? sel.dataset.autostart === "1" : true;
+}
+function setAutoStartChoice(enabled) {
+  $$("#autostart-choice .seg").forEach((b) => {
+    const on = (b.dataset.autostart === "1") === Boolean(enabled);
+    b.classList.toggle("is-selected", on);
+    b.setAttribute("aria-checked", String(on));
+  });
+}
+
 async function finishOnboarding() {
   const pin = $("#pin-input").value.trim();
   const err = validatePin(pin);
   if (err) {
     state.onboardStep = 2;
-    renderStep();
+    renderStep("back");
     $("#pin-error").textContent = err;
     return;
   }
-  const autoStart = $("#onb-autostart").checked;
+  const autoStart = getAutoStartChoice();
   $("#onb-next").disabled = true;
   $("#onb-next").textContent = "Starting…";
+  $("#finish-error").textContent = "";
   const res = await window.peek.completeOnboarding({ pin, autoStart });
   $("#onb-next").disabled = false;
   if (!res.ok) {
     $("#onb-next").textContent = "Finish";
-    $("#perm-note").innerHTML = `<span class="danger">${escapeHtml(
-      res.message || "Couldn't start the backend."
-    )}</span>`;
+    $("#finish-error").textContent = res.message || "Couldn't start the backend.";
     return;
   }
-  // Reflect new settings in the panel and go there.
+  // Reflect the saved preference in the panel, then animate across to it.
   $("#set-autostart").checked = autoStart;
-  showPanel();
+  transitionToPanel();
+}
+
+function transitionToPanel() {
+  const onb = $("#onboarding");
+  onb.classList.add("view-leaving");
+  setTimeout(() => {
+    onb.classList.remove("view-leaving");
+    showPanel(true);
+  }, 340);
 }
 
 function wireOnboarding() {
@@ -215,26 +267,60 @@ function wireOnboarding() {
 
   $("#onb-back").addEventListener("click", () => {
     state.onboardStep = Math.max(0, state.onboardStep - 1);
-    renderStep();
+    renderStep("back");
   });
 
+  // PIN: keep digits in the hidden input; reveal each freshly typed digit for
+  // 2s before it masks to a dot. The eye toggle reveals/hides the whole PIN.
   $("#pin-input").addEventListener("input", (e) => {
-    e.target.value = e.target.value.replace(/\D/g, "").slice(0, 6);
+    const clean = e.target.value.replace(/\D/g, "").slice(0, 6);
+    e.target.value = clean;
     $("#pin-error").textContent = "";
+    if (clean.length > state.pinPrevLen) {
+      state.pinRevealIndex = clean.length - 1;
+      clearTimeout(state.pinRevealTimer);
+      state.pinRevealTimer = setTimeout(() => {
+        state.pinRevealIndex = -1;
+        renderPinCells();
+      }, 2000);
+    } else {
+      state.pinRevealIndex = -1;
+    }
+    state.pinPrevLen = clean.length;
+    renderPinCells();
   });
   $("#pin-input").addEventListener("keydown", (e) => {
     if (e.key === "Enter") $("#onb-next").click();
   });
+
+  $("#pin-eye").addEventListener("click", () => {
+    state.pinRevealAll = !state.pinRevealAll;
+    const eye = $("#pin-eye");
+    eye.classList.toggle("is-revealed", state.pinRevealAll);
+    eye.setAttribute("aria-pressed", String(state.pinRevealAll));
+    eye.setAttribute("aria-label", state.pinRevealAll ? "Hide PIN" : "Show PIN");
+    renderPinCells();
+    $("#pin-input").focus();
+  });
+
+  $$("#autostart-choice .seg").forEach((b) =>
+    b.addEventListener("click", () => setAutoStartChoice(b.dataset.autostart === "1"))
+  );
 
   $("#ts-download").addEventListener("click", () => window.peek.openExternal(TAILSCALE_URL));
   $("#ts-recheck").addEventListener("click", checkTailscale);
 }
 
 // ============================ PANEL ============================
-function showPanel() {
+function showPanel(animate = false) {
   showView("panel");
+  if (animate) {
+    const panel = $("#panel");
+    panel.classList.remove("panel-enter");
+    void panel.offsetWidth; // reflow so the stagger replays
+    panel.classList.add("panel-enter");
+  }
   loadConnect();
-  refreshLogs();
   syncUpdateCard();
 }
 
@@ -275,8 +361,27 @@ async function loadConnect() {
   warn.hidden = true;
   wrap.innerHTML = info.qr_svg || "";
   $("#tailnet-url").textContent = info.app_url || "—";
+  fitUrlBox();
   state.qrExpiresAt = info.expires_at * 1000;
   startQrTimer();
+}
+
+// Keep the whole pairing URL on a single line: shrink the font just enough to
+// fit the box width (down to a readable floor) instead of wrapping.
+function fitUrlBox() {
+  const box = $("#tailnet-url");
+  if (!box) return;
+  box.style.fontSize = "";
+  const text = box.textContent.trim();
+  if (!text || text === "—") return;
+  let size = parseFloat(getComputedStyle(box).fontSize) || 11;
+  box.style.fontSize = `${size}px`;
+  let guard = 0;
+  while (box.scrollWidth > box.clientWidth && size > 7.5 && guard < 60) {
+    size -= 0.5;
+    box.style.fontSize = `${size}px`;
+    guard += 1;
+  }
 }
 
 function startQrTimer() {
@@ -299,14 +404,9 @@ function stopQrTimer() {
   state.qrTimer = null;
 }
 
-async function refreshLogs() {
-  const logs = await window.peek.backendLogs();
-  const out = $("#log-output");
-  out.textContent = logs || "(no output yet)";
-  out.scrollTop = out.scrollHeight;
-}
-
 function wirePanel() {
+  window.addEventListener("resize", fitUrlBox);
+
   $("#qr-refresh").addEventListener("click", loadConnect);
   $("#copy-url").addEventListener("click", async () => {
     const url = $("#tailnet-url").textContent;
@@ -330,13 +430,11 @@ function wirePanel() {
 
   $("#rerun-setup").addEventListener("click", async () => {
     await window.peek.restartOnboarding();
-    $("#pin-input").value = "";
-    $("#onb-autostart").checked = $("#set-autostart").checked;
+    resetPinField();
+    state.pinRevealAll = false;
+    $("#pin-eye").classList.remove("is-revealed");
+    setAutoStartChoice($("#set-autostart").checked);
     showOnboarding();
-  });
-
-  window.peek.onBackendLog(() => {
-    if (!$("#panel").hidden) refreshLogs();
   });
 
   $("#update-check").addEventListener("click", async () => {

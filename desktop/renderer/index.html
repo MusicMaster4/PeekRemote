@@ -23,10 +23,6 @@
     </div>
 
     <header class="topbar">
-      <div class="brand">
-        <span class="logo" aria-hidden="true"></span>
-        <span class="wordmark">PEEK&nbsp;REMOTE</span>
-      </div>
       <div class="topstatus">
         <span id="status-dot" class="dot dot-idle"></span>
         <span id="status-text" class="mono small muted">Starting…</span>
@@ -38,7 +34,6 @@
       <section id="onboarding" class="view onboarding" hidden>
         <!-- Left rail: brand + vertical progress -->
         <aside class="rail">
-          <div class="rail-mark" aria-hidden="true"></div>
           <ol class="rail-steps">
             <li class="rail-step">
               <span data-step-dot="0" class="step-dot"></span>
@@ -64,10 +59,13 @@
         <div class="pane">
           <div class="pane-body">
             <!-- Step 0: Welcome -->
-            <div class="step" data-step="0">
-              <h1 class="display">Welcome</h1>
-              <p class="lead">See and control this computer from your phone — privately, over your own Tailscale network.</p>
-              <ul class="chips">
+            <div class="step welcome" data-step="0">
+              <div class="welcome-iris" aria-hidden="true"></div>
+              <h1 class="display welcome-title" id="welcome-title">Welcome</h1>
+              <p class="lead welcome-lead">
+                See and control this computer from your phone — privately, over your own Tailscale network.
+              </p>
+              <ul class="chips welcome-chips">
                 <li>Live screen + control</li>
                 <li>Private Tailscale tunnel</li>
                 <li>PIN&nbsp;+&nbsp;QR pairing</li>
@@ -91,29 +89,56 @@
             <div class="step" data-step="2" hidden>
               <h1 class="display">Set a PIN</h1>
               <p class="lead">A 6-digit fallback login. QR pairing skips it.</p>
-              <input
-                id="pin-input"
-                class="pin"
-                inputmode="numeric"
-                maxlength="6"
-                autocomplete="off"
-                placeholder="● ● ● ● ● ●"
-                aria-label="6-digit PIN"
-              />
+
+              <div class="pin-field">
+                <div class="pin-box">
+                  <div class="pin-cells" id="pin-cells" aria-hidden="true">
+                    <span class="pin-cell"></span>
+                    <span class="pin-cell"></span>
+                    <span class="pin-cell"></span>
+                    <span class="pin-cell"></span>
+                    <span class="pin-cell"></span>
+                    <span class="pin-cell"></span>
+                  </div>
+                  <input
+                    id="pin-input"
+                    class="pin-input"
+                    inputmode="numeric"
+                    maxlength="6"
+                    autocomplete="off"
+                    aria-label="6-digit PIN"
+                  />
+                </div>
+                <button type="button" id="pin-eye" class="pin-eye" aria-label="Show PIN" aria-pressed="false">
+                  <svg class="icon-eye" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M1.5 12S5 5 12 5s10.5 7 10.5 7-3.5 7-10.5 7S1.5 12 1.5 12Z" />
+                    <circle cx="12" cy="12" r="3" />
+                  </svg>
+                  <svg class="icon-eye-off" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                    <path d="M3 3l18 18" />
+                    <path d="M10.6 6.2A10.8 10.8 0 0 1 12 5c7 0 10.5 7 10.5 7a18 18 0 0 1-3.2 4" />
+                    <path d="M6.2 7.3A18 18 0 0 0 1.5 12S5 19 12 19a10.6 10.6 0 0 0 4-.8" />
+                    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+                  </svg>
+                </button>
+              </div>
               <p id="pin-error" class="note mono small danger" role="alert"></p>
             </div>
 
-            <!-- Step 3: Options + finish -->
+            <!-- Step 3: Start-on-boot question + finish -->
             <div class="step" data-step="3" hidden>
               <h1 class="display">Almost done</h1>
-              <label class="toggle-row">
-                <span>
-                  <span class="toggle-title">Start on login</span>
-                  <span class="toggle-sub mono small muted">Launch to the tray at boot.</span>
-                </span>
-                <input type="checkbox" id="onb-autostart" class="switch" />
-              </label>
-              <div id="perm-note" class="status-card mono small muted"></div>
+              <p class="lead">Should Peek Remote start automatically when this computer boots?</p>
+              <div class="segmented" id="autostart-choice" role="radiogroup" aria-label="Start on boot">
+                <button type="button" class="seg is-selected" data-autostart="1" role="radio" aria-checked="true">
+                  Yes, start on boot
+                </button>
+                <button type="button" class="seg" data-autostart="0" role="radio" aria-checked="false">
+                  No, I'll open it
+                </button>
+              </div>
+              <p class="note mono small faint">You can change this later in Settings.</p>
+              <p id="finish-error" class="note mono small danger" role="alert"></p>
             </div>
           </div>
 
@@ -126,74 +151,76 @@
 
       <!-- ======================= PANEL ======================= -->
       <section id="panel" class="view panel" hidden>
-        <!-- Left column: pairing -->
-        <div class="col col-pair">
-          <div class="card connect-card">
-            <h2 class="card-title mono small muted">Pair your phone</h2>
+        <div class="panel-stage">
+          <div class="panel-grid">
+            <!-- Left card: pairing (the hero) -->
+            <div class="card connect-card">
+              <div class="card-head">
+                <h2 class="card-title mono small muted">Pair your phone</h2>
+                <span class="card-hint mono small faint">Scan with your phone camera</span>
+              </div>
 
-            <div id="qr-wrap" class="qr-wrap">
-              <div class="qr-placeholder mono small muted">Preparing…</div>
-            </div>
+              <div id="qr-wrap" class="qr-wrap">
+                <div class="qr-placeholder mono small muted">Preparing…</div>
+              </div>
 
-            <div id="connect-meta">
-              <div class="url-box mono small" id="tailnet-url">—</div>
-              <div class="qr-sub mono small muted">
-                Refreshes in <span id="qr-timer" class="tabnum">--:--</span>
+              <div id="connect-meta">
+                <div class="url-box mono small" id="tailnet-url">—</div>
+                <div class="qr-sub mono small muted">
+                  Refreshes in <span id="qr-timer" class="tabnum">--:--</span>
+                </div>
+              </div>
+
+              <div id="connect-warning" class="status-card" hidden></div>
+
+              <div class="actions-row">
+                <button id="qr-refresh" class="btn btn-ghost btn-sm">New QR</button>
+                <button id="copy-url" class="btn btn-ghost btn-sm">Copy URL</button>
               </div>
             </div>
 
-            <div id="connect-warning" class="status-card" hidden></div>
+            <!-- Right card: settings + updates (matched height) -->
+            <div class="card side-card">
+              <div class="side-section">
+                <h2 class="card-title mono small muted">Settings</h2>
 
-            <div class="actions-row">
-              <button id="qr-refresh" class="btn btn-ghost btn-sm">New QR</button>
-              <button id="copy-url" class="btn btn-ghost btn-sm">Copy URL</button>
+                <label class="toggle-row">
+                  <span>
+                    <span class="toggle-title">Start on login</span>
+                    <span class="toggle-sub mono small muted">Run in the tray at startup.</span>
+                  </span>
+                  <input type="checkbox" id="set-autostart" class="switch" />
+                </label>
+
+                <label class="toggle-row">
+                  <span>
+                    <span class="toggle-title">Auto-check updates</span>
+                    <span class="toggle-sub mono small muted">Check GitHub on launch.</span>
+                  </span>
+                  <input type="checkbox" id="set-autoupdate" class="switch" />
+                </label>
+
+                <button id="rerun-setup" class="btn btn-ghost full">Re-run setup</button>
+              </div>
+
+              <div class="side-divider"></div>
+
+              <div class="side-section">
+                <h2 class="card-title mono small muted">Updates</h2>
+                <div id="update-state" class="status-card mono small muted">Version —</div>
+                <div class="actions-row">
+                  <button id="update-check" class="btn btn-ghost btn-sm">Check now</button>
+                  <button id="update-action" class="btn btn-solid btn-sm" hidden>Download</button>
+                </div>
+              </div>
             </div>
           </div>
         </div>
 
-        <!-- Right column: settings, updates, logs -->
-        <div class="col col-settings">
-          <div class="card">
-            <h2 class="card-title mono small muted">Settings</h2>
-
-            <label class="toggle-row">
-              <span>
-                <span class="toggle-title">Start on login</span>
-                <span class="toggle-sub mono small muted">Run in the tray at startup.</span>
-              </span>
-              <input type="checkbox" id="set-autostart" class="switch" />
-            </label>
-
-            <label class="toggle-row">
-              <span>
-                <span class="toggle-title">Auto-check updates</span>
-                <span class="toggle-sub mono small muted">Check GitHub on launch.</span>
-              </span>
-              <input type="checkbox" id="set-autoupdate" class="switch" />
-            </label>
-
-            <button id="rerun-setup" class="btn btn-ghost full">Re-run setup</button>
-          </div>
-
-          <div class="card">
-            <h2 class="card-title mono small muted">Updates</h2>
-            <div id="update-state" class="status-card mono small muted">Version —</div>
-            <div class="actions-row">
-              <button id="update-check" class="btn btn-ghost btn-sm">Check now</button>
-              <button id="update-action" class="btn btn-solid btn-sm" hidden>Download</button>
-            </div>
-          </div>
-
-          <details class="logs">
-            <summary class="mono small muted">Backend logs</summary>
-            <pre id="log-output" class="log-output mono small"></pre>
-          </details>
-
-          <footer class="footer mono small faint">
-            <span id="footer-version">Peek Remote</span>
-            <a href="#" id="repo-link">GitHub ↗</a>
-          </footer>
-        </div>
+        <footer class="footer mono small faint">
+          <span id="footer-version">—</span>
+          <a href="#" id="repo-link">GitHub ↗</a>
+        </footer>
       </section>
     </main>
 

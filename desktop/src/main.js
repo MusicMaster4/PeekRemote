@@ -11,6 +11,7 @@ const {
   nativeImage,
   clipboard,
   shell,
+  screen,
 } = require("electron");
 
 const config = require("./config");
@@ -91,9 +92,19 @@ async function init() {
 }
 
 function createWindow() {
+  const { width: sw, height: sh } = screen.getPrimaryDisplay().workAreaSize;
+  // Open at ~60% of the screen, kept in a comfortable landscape ratio and
+  // clamped so it never gets tiny on small displays or huge on large ones.
+  const winWidth = clamp(Math.round(sw * 0.6), 880, 1500);
+  const winHeight = clamp(
+    Math.round(winWidth / 1.5),
+    580,
+    Math.round(sh * 0.85)
+  );
+
   win = new BrowserWindow({
-    width: 980,
-    height: 640,
+    width: winWidth,
+    height: winHeight,
     minWidth: 840,
     minHeight: 560,
     center: true,
@@ -170,6 +181,10 @@ function createTray() {
   ]);
   tray.setContextMenu(menu);
   tray.on("click", () => showWindow());
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
 }
 
 function showWindow() {
@@ -285,18 +300,19 @@ function registerIpc() {
     if (["000000", "111111", "123456", "654321", "121212", "112233"].includes(pin)) {
       return { ok: false, message: "Choose a less predictable 6-digit PIN." };
     }
+    // Onboarding succeeds when the PIN is saved and the backend starts.
+    // Start-on-boot is a convenience: if Windows refuses to register the task,
+    // we record the preference but never block finishing (and never surface raw
+    // PowerShell output to the UI).
+    config.save({ pin, onboardingComplete: true });
     const autoStartResult = await applyAutoStart(Boolean(autoStart));
     if (!autoStartResult.ok) {
-      return {
-        ok: false,
-        message: autoStartResult.message || "Could not configure Windows startup.",
-      };
+      console.warn("[main] auto-start not configured:", autoStartResult.message);
     }
-    config.save({ pin, onboardingComplete: true });
     try {
       await backend.stop();
       await startBackend();
-      return { ok: true };
+      return { ok: true, autoStartConfigured: autoStartResult.ok };
     } catch (err) {
       return { ok: false, message: String(err.message || err) };
     }
