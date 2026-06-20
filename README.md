@@ -52,22 +52,30 @@ Peek Remote guides you from first launch to phone pairing inside the desktop app
   <img src="docs/readme/01-welcome.png" alt="Peek Remote welcome screen" width="760" />
 </p>
 
-### 2. Check Tailscale
+### 2. Install Tailscale on this PC
 
 <p align="center">
   <img src="docs/readme/02-tailscale.png" alt="Peek Remote Tailscale setup step" width="760" />
 </p>
 
-### 3. Set a PIN
+### 3. Set up your phone
+
+Add your phone to the same Tailscale network so it can reach this computer.
 
 <p align="center">
-  <img src="docs/readme/03-pin.png" alt="Peek Remote PIN setup step" width="760" />
+  <img src="docs/readme/03-phone.png" alt="Peek Remote phone setup step" width="760" />
 </p>
 
-### 4. Pair your phone
+### 4. Set a PIN
 
 <p align="center">
-  <img src="docs/readme/04-dashboard.png" alt="Peek Remote QR pairing and settings screen" width="760" />
+  <img src="docs/readme/04-pin.png" alt="Peek Remote PIN setup step" width="760" />
+</p>
+
+### 5. Pair your phone
+
+<p align="center">
+  <img src="docs/readme/05-dashboard.png" alt="Peek Remote QR pairing and settings screen" width="760" />
 </p>
 
 ---
