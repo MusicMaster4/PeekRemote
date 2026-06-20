@@ -28,15 +28,20 @@ let isQuitting = false;
 let crashRestarts = 0;
 let singleInstanceHandlerRegistered = false;
 
+// Icons live in build/ during dev, but build/ is buildResources and isn't packed
+// into the asar — in the installed app they're shipped to resources/ via
+// extraResources. Resolve the right directory for each mode so the tray/window
+// icon always loads (a missing file is why the tray slot was blank when installed).
+const ICON_DIR = app.isPackaged
+  ? process.resourcesPath
+  : path.join(__dirname, "..", "build");
 // Window/taskbar icon: the multi-res .ico is sharpest on Windows; PNG elsewhere.
 const ICON_PATH = path.join(
-  __dirname,
-  "..",
-  "build",
+  ICON_DIR,
   process.platform === "win32" ? "icon.ico" : "icon.png"
 );
-// Tray reads the PNG so it downscales cleanly to menu-bar size.
-const TRAY_ICON_PATH = path.join(__dirname, "..", "build", "icon.png");
+// Tray: Windows uses the multi-res .ico (crisp at 16px); PNG on macOS/Linux.
+const TRAY_ICON_PATH = path.join(ICON_DIR, "icon.png");
 
 // Single instance: a second launch just focuses the existing window so we never
 // run two backends on the same machine.

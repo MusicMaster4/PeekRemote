@@ -2,6 +2,14 @@
 
 const REPO_URL = "https://github.com/MusicMaster4/PeekRemote";
 const TAILSCALE_URL = "https://tailscale.com/download";
+const TAILSCALE_IOS_URL = "https://apps.apple.com/app/tailscale/id1470499037";
+const TAILSCALE_ANDROID_URL =
+  "https://play.google.com/store/apps/details?id=com.tailscale.ipn";
+const TAILSCALE_GUIDE_URL = "https://tailscale.com/kb/1017/install";
+
+// Onboarding steps: Welcome(0) → This PC(1) → Phone(2) → PIN(3) → Finish(4).
+const PIN_STEP = 3;
+const LAST_STEP = 4;
 
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -108,7 +116,7 @@ function renderStep(direction = "fwd") {
     d.classList.toggle("is-active", Number(d.dataset.stepDot) <= step)
   );
   $("#onb-back").hidden = step === 0;
-  $("#onb-next").textContent = step === 3 ? "Finish" : "Next";
+  $("#onb-next").textContent = step === LAST_STEP ? "Finish" : "Next";
 
   // Re-trigger the directional one-shot enter animation on the visible step.
   const active = $(`.step[data-step="${step}"]`);
@@ -120,7 +128,7 @@ function renderStep(direction = "fwd") {
 
   if (step === 0) playWelcomeIntro();
   if (step === 1) checkTailscale();
-  if (step === 2) {
+  if (step === PIN_STEP) {
     renderPinCells();
     setTimeout(() => $("#pin-input").focus(), 60);
   }
@@ -220,7 +228,7 @@ async function finishOnboarding() {
   const pin = $("#pin-input").value.trim();
   const err = validatePin(pin);
   if (err) {
-    state.onboardStep = 2;
+    state.onboardStep = PIN_STEP;
     renderStep("back");
     $("#pin-error").textContent = err;
     return;
@@ -252,16 +260,16 @@ function transitionToPanel() {
 
 function wireOnboarding() {
   $("#onb-next").addEventListener("click", async () => {
-    if (state.onboardStep === 2) {
+    if (state.onboardStep === PIN_STEP) {
       const err = validatePin($("#pin-input").value.trim());
       $("#pin-error").textContent = err;
       if (err) return;
     }
-    if (state.onboardStep === 3) {
+    if (state.onboardStep === LAST_STEP) {
       await finishOnboarding();
       return;
     }
-    state.onboardStep = Math.min(3, state.onboardStep + 1);
+    state.onboardStep = Math.min(LAST_STEP, state.onboardStep + 1);
     renderStep();
   });
 
@@ -309,6 +317,13 @@ function wireOnboarding() {
 
   $("#ts-download").addEventListener("click", () => window.peek.openExternal(TAILSCALE_URL));
   $("#ts-recheck").addEventListener("click", checkTailscale);
+
+  // Phone-setup step resources
+  $("#ts-ios").addEventListener("click", () => window.peek.openExternal(TAILSCALE_IOS_URL));
+  $("#ts-android").addEventListener("click", () =>
+    window.peek.openExternal(TAILSCALE_ANDROID_URL)
+  );
+  $("#ts-guide").addEventListener("click", () => window.peek.openExternal(TAILSCALE_GUIDE_URL));
 }
 
 // ============================ PANEL ============================

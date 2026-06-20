@@ -41,14 +41,18 @@
             </li>
             <li class="rail-step">
               <span data-step-dot="1" class="step-dot"></span>
-              <span class="rail-label">Tailscale</span>
+              <span class="rail-label">This PC</span>
             </li>
             <li class="rail-step">
               <span data-step-dot="2" class="step-dot"></span>
-              <span class="rail-label">PIN</span>
+              <span class="rail-label">Phone</span>
             </li>
             <li class="rail-step">
               <span data-step-dot="3" class="step-dot"></span>
+              <span class="rail-label">PIN</span>
+            </li>
+            <li class="rail-step">
+              <span data-step-dot="4" class="step-dot"></span>
               <span class="rail-label">Finish</span>
             </li>
           </ol>
@@ -72,10 +76,10 @@
               </ul>
             </div>
 
-            <!-- Step 1: Tailscale -->
+            <!-- Step 1: Tailscale on this PC -->
             <div class="step" data-step="1" hidden>
               <h1 class="display">Install Tailscale</h1>
-              <p class="lead">Install Tailscale on this PC and your phone, signed into the same account.</p>
+              <p class="lead">Install Tailscale on this PC and sign in to your account.</p>
               <div id="ts-state" class="status-card">
                 <div class="status-line"><span class="dot dot-idle"></span><span>Checking…</span></div>
               </div>
@@ -85,8 +89,26 @@
               </div>
             </div>
 
-            <!-- Step 2: PIN -->
+            <!-- Step 2: Tailscale on your phone -->
             <div class="step" data-step="2" hidden>
+              <h1 class="display">Set up your phone</h1>
+              <p class="lead">
+                Put your phone on the same Tailscale network — it finds this computer automatically.
+              </p>
+              <ol class="steps-list">
+                <li>Install the <strong>Tailscale</strong> app from the App Store or Google Play.</li>
+                <li>Sign in with the <strong>same account</strong> you used on this PC.</li>
+                <li>Turn Tailscale <strong>on</strong>, then come back here.</li>
+              </ol>
+              <div class="actions-row">
+                <button id="ts-ios" class="btn btn-ghost btn-sm">App Store ↗</button>
+                <button id="ts-android" class="btn btn-ghost btn-sm">Google Play ↗</button>
+                <button id="ts-guide" class="btn btn-ghost btn-sm">Setup guide ↗</button>
+              </div>
+            </div>
+
+            <!-- Step 3: PIN -->
+            <div class="step" data-step="3" hidden>
               <h1 class="display">Set a PIN</h1>
               <p class="lead">A 6-digit fallback login. QR pairing skips it.</p>
 
@@ -125,8 +147,8 @@
               <p id="pin-error" class="note mono small danger" role="alert"></p>
             </div>
 
-            <!-- Step 3: Start-on-boot question + finish -->
-            <div class="step" data-step="3" hidden>
+            <!-- Step 4: Start-on-boot question + finish -->
+            <div class="step" data-step="4" hidden>
               <h1 class="display">Almost done</h1>
               <p class="lead">Should Peek Remote start automatically when this computer boots?</p>
               <div class="segmented" id="autostart-choice" role="radiogroup" aria-label="Start on boot">

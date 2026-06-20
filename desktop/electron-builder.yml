@@ -14,9 +14,15 @@ files:
 
 # The PyInstaller-built backend bundle is shipped alongside the app (unpacked),
 # so the end user never needs Python. Built by CI into ../dist/peek-backend.
+# The app icons are shipped here too (the build/ dir is buildResources and is
+# NOT packed into the asar) so the tray/window can load them at runtime.
 extraResources:
   - from: ../dist/peek-backend
     to: backend
+  - from: build/icon.ico
+    to: icon.ico
+  - from: build/icon.png
+    to: icon.png
 
 # Auto-update source: GitHub Releases. electron-updater reads latest.yml /
 # latest-mac.yml from the release matching the running version.

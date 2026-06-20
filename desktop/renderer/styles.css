@@ -399,6 +399,45 @@ h1.display {
   }
 }
 
+/* numbered step list (phone setup) */
+.steps-list {
+  margin: 4px 0 6px;
+  padding: 0;
+  list-style: none;
+  counter-reset: s;
+  display: flex;
+  flex-direction: column;
+  gap: 13px;
+  max-width: 50ch;
+}
+.steps-list li {
+  counter-increment: s;
+  position: relative;
+  padding-left: 40px;
+  color: var(--silver);
+  line-height: 1.45;
+}
+.steps-list li::before {
+  content: counter(s);
+  position: absolute;
+  left: 0;
+  top: -2px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  font-family: var(--mono);
+  font-size: 0.74rem;
+  color: var(--ink);
+  background: var(--panel-strong);
+  border: 1px solid var(--line-strong);
+  border-radius: 50%;
+}
+.steps-list strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+
 /* welcome chips */
 .chips {
   list-style: none;
