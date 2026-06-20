@@ -92,18 +92,27 @@
             <!-- Step 2: Tailscale on your phone -->
             <div class="step" data-step="2" hidden>
               <h1 class="display">Set up your phone</h1>
-              <p class="lead">
-                Put your phone on the same Tailscale network — it finds this computer automatically.
-              </p>
-              <ol class="steps-list">
-                <li>Install the <strong>Tailscale</strong> app from the App Store or Google Play.</li>
-                <li>Sign in with the <strong>same account</strong> you used on this PC.</li>
-                <li>Turn Tailscale <strong>on</strong>, then come back here.</li>
-              </ol>
-              <div class="actions-row">
-                <button id="ts-ios" class="btn btn-ghost btn-sm">App Store ↗</button>
-                <button id="ts-android" class="btn btn-ghost btn-sm">Google Play ↗</button>
-                <button id="ts-guide" class="btn btn-ghost btn-sm">Setup guide ↗</button>
+              <p class="lead">Add your phone to the same Tailscale network.</p>
+              <div class="phone-steps">
+                <div class="phone-step">
+                  <span class="phone-num">1</span>
+                  <h3 class="phone-title">Install</h3>
+                  <p class="phone-desc">Get the Tailscale app.</p>
+                  <div class="phone-links">
+                    <button id="ts-ios" class="phone-link">App Store ↗</button>
+                    <button id="ts-android" class="phone-link">Google Play ↗</button>
+                  </div>
+                </div>
+                <div class="phone-step">
+                  <span class="phone-num">2</span>
+                  <h3 class="phone-title">Sign in</h3>
+                  <p class="phone-desc">Same account as this PC.</p>
+                </div>
+                <div class="phone-step">
+                  <span class="phone-num">3</span>
+                  <h3 class="phone-title">Connect</h3>
+                  <p class="phone-desc">Turn Tailscale on.</p>
+                </div>
               </div>
             </div>
 

@@ -399,43 +399,62 @@ h1.display {
   }
 }
 
-/* numbered step list (phone setup) */
-.steps-list {
-  margin: 4px 0 6px;
-  padding: 0;
-  list-style: none;
-  counter-reset: s;
+/* phone setup — three minimal step columns (no boxes) */
+.phone-steps {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 30px;
+  margin: 18px 0 0;
+  max-width: 560px;
+}
+.phone-step {
   display: flex;
   flex-direction: column;
-  gap: 13px;
-  max-width: 50ch;
+  gap: 6px;
 }
-.steps-list li {
-  counter-increment: s;
-  position: relative;
-  padding-left: 40px;
-  color: var(--silver);
-  line-height: 1.45;
-}
-.steps-list li::before {
-  content: counter(s);
-  position: absolute;
-  left: 0;
-  top: -2px;
+.phone-num {
   width: 26px;
   height: 26px;
   display: grid;
   place-items: center;
-  font-family: var(--mono);
-  font-size: 0.74rem;
-  color: var(--ink);
-  background: var(--panel-strong);
-  border: 1px solid var(--line-strong);
   border-radius: 50%;
+  border: 1px solid var(--line-strong);
+  color: var(--silver);
+  font-family: var(--mono);
+  font-size: 0.72rem;
 }
-.steps-list strong {
+.phone-title {
+  margin: 7px 0 0;
+  font-size: 0.92rem;
   color: var(--ink);
   font-weight: 600;
+}
+.phone-desc {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--muted);
+  line-height: 1.5;
+}
+.phone-links {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-top: 6px;
+}
+.phone-link {
+  background: none;
+  border: none;
+  padding: 0;
+  font-family: var(--sans);
+  font-size: 0.78rem;
+  color: var(--silver);
+  cursor: pointer;
+  transition: color 0.15s ease;
+}
+.phone-link:hover {
+  color: var(--ink);
+  text-decoration: underline;
 }
 
 /* welcome chips */

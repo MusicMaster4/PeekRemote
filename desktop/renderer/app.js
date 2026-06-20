@@ -5,7 +5,6 @@ const TAILSCALE_URL = "https://tailscale.com/download";
 const TAILSCALE_IOS_URL = "https://apps.apple.com/app/tailscale/id1470499037";
 const TAILSCALE_ANDROID_URL =
   "https://play.google.com/store/apps/details?id=com.tailscale.ipn";
-const TAILSCALE_GUIDE_URL = "https://tailscale.com/kb/1017/install";
 
 // Onboarding steps: Welcome(0) → This PC(1) → Phone(2) → PIN(3) → Finish(4).
 const PIN_STEP = 3;
@@ -318,12 +317,11 @@ function wireOnboarding() {
   $("#ts-download").addEventListener("click", () => window.peek.openExternal(TAILSCALE_URL));
   $("#ts-recheck").addEventListener("click", checkTailscale);
 
-  // Phone-setup step resources
+  // Phone-setup step: store links
   $("#ts-ios").addEventListener("click", () => window.peek.openExternal(TAILSCALE_IOS_URL));
   $("#ts-android").addEventListener("click", () =>
     window.peek.openExternal(TAILSCALE_ANDROID_URL)
   );
-  $("#ts-guide").addEventListener("click", () => window.peek.openExternal(TAILSCALE_GUIDE_URL));
 }
 
 // ============================ PANEL ============================
