@@ -22,15 +22,79 @@ class Screenshot:
     width: int
     height: int
     media_type: str
+    monitor_id: int
+    monitor_left: int
+    monitor_top: int
 
 
-def _grab_image():
+@dataclass(frozen=True)
+class Monitor:
+    id: int
+    left: int
+    top: int
+    width: int
+    height: int
+    primary: bool = False
+
+
+def _monitors_mss() -> list[Monitor]:
+    if not _MSS_OK:
+        return []
+    with mss.mss() as sct:
+        monitors = []
+        for index, raw in enumerate(sct.monitors[1:], start=1):
+            monitors.append(
+                Monitor(
+                    id=index,
+                    left=int(raw["left"]),
+                    top=int(raw["top"]),
+                    width=int(raw["width"]),
+                    height=int(raw["height"]),
+                    primary=index == 1,
+                )
+            )
+        return monitors
+
+
+def list_monitors() -> list[Monitor]:
+    monitors = _monitors_mss()
+    if monitors:
+        return monitors
+    image = ImageGrab.grab()
+    width, height = image.size
+    return [Monitor(id=1, left=0, top=0, width=width, height=height, primary=True)]
+
+
+def monitor_for_id(monitor_id: int | None = None) -> Monitor:
+    monitors = list_monitors()
+    if not monitors:
+        return Monitor(id=1, left=0, top=0, width=0, height=0, primary=True)
+    if monitor_id is not None:
+        for monitor in monitors:
+            if monitor.id == monitor_id:
+                return monitor
+    return monitors[0]
+
+
+def _grab_image(monitor_id: int | None = None) -> tuple[Image.Image, Monitor]:
     if _MSS_OK:
         with mss.mss() as sct:
-            monitor = sct.monitors[1] if len(sct.monitors) > 1 else sct.monitors[0]
-            shot = sct.grab(monitor)
-            return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX")
-    return ImageGrab.grab()
+            index = monitor_id if monitor_id and 0 < monitor_id < len(sct.monitors) else 1
+            if index >= len(sct.monitors):
+                index = 1
+            raw = sct.monitors[index] if len(sct.monitors) > 1 else sct.monitors[0]
+            shot = sct.grab(raw)
+            monitor = Monitor(
+                id=index if len(sct.monitors) > 1 else 1,
+                left=int(raw["left"]),
+                top=int(raw["top"]),
+                width=int(raw["width"]),
+                height=int(raw["height"]),
+                primary=index == 1,
+            )
+            return Image.frombytes("RGB", shot.size, shot.bgra, "raw", "BGRX"), monitor
+    image = ImageGrab.grab()
+    return image, Monitor(id=1, left=0, top=0, width=image.size[0], height=image.size[1], primary=True)
 
 
 def _normalize_format(image_format: str) -> tuple[str, str, str]:
@@ -47,9 +111,10 @@ def capture_screen(
     image_format: str = "jpeg",
     quality: int = 72,
     max_width: int | None = None,
+    monitor_id: int | None = None,
 ) -> Screenshot:
     timestamp = datetime.now()
-    image = _grab_image()
+    image, monitor = _grab_image(monitor_id)
     width, height = image.size
 
     if max_width and width > max_width:
@@ -74,4 +139,7 @@ def capture_screen(
         width=width,
         height=height,
         media_type=media_type,
+        monitor_id=monitor.id,
+        monitor_left=monitor.left,
+        monitor_top=monitor.top,
     )

@@ -64,6 +64,19 @@ class Settings(BaseSettings):
         default=Path("audit.log"),
         validation_alias=AliasChoices("AUDIT_LOG_FILE"),
     )
+    # Writable app data directory passed by the Electron shell. Used for
+    # persistent paired-device names and other local-only state.
+    app_data_dir: Path = Field(
+        default=Path(".peek-remote-data"),
+        validation_alias=AliasChoices("APP_DATA_DIR"),
+    )
+    # Random secret shared only between Electron main and the backend. It lets
+    # the desktop panel manage local state without exposing those endpoints to
+    # authenticated phones or the tailnet proxy.
+    desktop_api_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("DESKTOP_API_TOKEN"),
+    )
     # Caminho do executavel do Tailscale. Vazio = autodetecta (Program Files / PATH).
     tailscale_path: str = Field(
         default="",
@@ -118,6 +131,16 @@ class Settings(BaseSettings):
         ge=0,
         le=1000,
         validation_alias=AliasChoices("POST_INPUT_CAPTURE_DELAY_MS"),
+    )
+    clipboard_sync_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("CLIPBOARD_SYNC_ENABLED"),
+    )
+    stream_fps: int = Field(
+        default=24,
+        ge=1,
+        le=30,
+        validation_alias=AliasChoices("STREAM_FPS"),
     )
 
     @field_validator("screenshot_format")

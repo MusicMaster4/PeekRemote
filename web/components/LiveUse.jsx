@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { captureScreenshot, revokeScreenshot, sendInputAndCapture } from "@/lib/api";
+import {
+  captureScreenshot,
+  getClipboard,
+  getPrivacyState,
+  listMonitors,
+  revokeScreenshot,
+  screenshotStreamUrl,
+  sendInput,
+  sendInputAndCapture,
+  setPrivacyMode,
+} from "@/lib/api";
 import {
   IconChevronLeft,
   IconRefresh,
@@ -13,6 +23,8 @@ import {
   IconChevronDown,
   IconLogout,
   IconUsers,
+  IconLock,
+  IconMonitor,
 } from "@/components/icons";
 
 const MIN = 1;
@@ -21,7 +33,7 @@ const MAX = 6;
 // Kept tiny so the screenshot (and the remote taskbar at its bottom edge) stays
 // as large and visible as possible.
 const SURFACE_GAP = 10;
-const AUTO_INTERVAL = 1500; // ms between frames while "Auto" is on
+const STREAM_FPS = 24;
 
 // Ready-made combos — avoid typing and getting the syntax wrong. They're OS
 // aware: the backend reports the HOST machine's OS (via /api/session → `os`) and
@@ -234,6 +246,12 @@ export default function LiveUse({
   const [pct, setPct] = useState(100);
   const [busy, setBusy] = useState(false);
   const [auto, setAuto] = useState(false);
+  const [streamUrl, setStreamUrl] = useState("");
+  const [privacyOn, setPrivacyOn] = useState(false);
+  const [privacyBusy, setPrivacyBusy] = useState(false);
+  const [monitors, setMonitors] = useState([]);
+  const [monitorId, setMonitorId] = useState(initialShot?.monitorId || 1);
+  const monitorIdRef = useRef(initialShot?.monitorId || 1);
   const [status, setStatus] = useState({ text: "Ready.", state: "idle" });
   const [showHint, setShowHint] = useState(true);
 
@@ -270,6 +288,10 @@ export default function LiveUse({
   useEffect(() => {
     shotRef.current = shot;
   }, [shot]);
+
+  useEffect(() => {
+    monitorIdRef.current = monitorId;
+  }, [monitorId]);
 
   const replaceShot = (nextShot) => {
     if (nextShot?.image?.startsWith("blob:")) {
@@ -455,7 +477,7 @@ export default function LiveUse({
     busyRef.current = true;
     setBusy(true);
     try {
-      const data = await captureScreenshot("live");
+      const data = await captureScreenshot("live", monitorIdRef.current);
       if (!mountedRef.current) return;
       replaceShot(data);
     } catch (err) {
@@ -468,28 +490,42 @@ export default function LiveUse({
     }
   };
 
-  const tick = async () => {
-    await doRefresh();
-    if (autoRef.current && mountedRef.current) {
-      refreshTimer.current = setTimeout(tick, AUTO_INTERVAL);
-    }
-  };
-
   const toggleAuto = () => {
     setAuto((prev) => {
       const next = !prev;
       autoRef.current = next;
       clearTimeout(refreshTimer.current);
-      if (next) tick();
+      setStreamUrl(
+        next
+          ? screenshotStreamUrl({
+              profile: "live",
+              monitor: monitorIdRef.current,
+              fps: STREAM_FPS,
+              nonce: Date.now(),
+            })
+          : "",
+      );
+      setStatus({
+        text: next ? `Streaming at ${STREAM_FPS} fps.` : "Auto stream off.",
+        state: "idle",
+      });
+      if (!next) setTimeout(doRefresh, 0);
       return next;
     });
   };
 
   // ---- Sending actions ---------------------------------------------------
   const send = async (payload, label) => {
+    const withMonitor = { ...payload, monitor_id: monitorIdRef.current };
     setStatus({ text: "Sending…", state: "busy" });
     try {
-      const data = await sendInputAndCapture(payload);
+      if (autoRef.current) {
+        await sendInput(withMonitor);
+        if (!mountedRef.current) return;
+        setStatus({ text: label || "Sent.", state: "idle" });
+        return true;
+      }
+      const data = await sendInputAndCapture(withMonitor);
       if (!mountedRef.current) return;
       replaceShot(data);
       setStatus({ text: label || "Sent.", state: "idle" });
@@ -593,6 +629,105 @@ export default function LiveUse({
 
   const toggleMod = (id) =>
     setActiveMods((prev) => (prev.includes(id) ? prev.filter((m) => m !== id) : [...prev, id]));
+
+  const handleMonitorChange = (nextId) => {
+    const parsed = Number(nextId) || 1;
+    setMonitorId(parsed);
+    monitorIdRef.current = parsed;
+    crosshair.current = { fx: 0.5, fy: 0.5 };
+    view.current = { scale: 1, tx: 0, ty: 0 };
+    setPct(100);
+    if (autoRef.current) {
+      setStreamUrl(
+        screenshotStreamUrl({
+          profile: "live",
+          monitor: parsed,
+          fps: STREAM_FPS,
+          nonce: Date.now(),
+        }),
+      );
+    }
+    requestAnimationFrame(() => {
+      apply(true);
+      doRefresh();
+    });
+  };
+
+  const togglePrivacy = async () => {
+    if (!isOwner || privacyBusy) return;
+    const next = !privacyOn;
+    setPrivacyBusy(true);
+    setStatus({ text: next ? "Enabling Privacy Mode..." : "Disabling Privacy Mode...", state: "busy" });
+    try {
+      const state = await setPrivacyMode(next);
+      setPrivacyOn(Boolean(state.enabled));
+      setStatus({
+        text: state.enabled ? "Privacy Mode on." : "Privacy Mode off.",
+        state: state.input_blocked || !state.enabled ? "idle" : "error",
+      });
+    } catch (err) {
+      if (err.unauthorized) return onLogout();
+      setStatus({ text: err.message || "Privacy Mode failed.", state: "error" });
+    } finally {
+      setPrivacyBusy(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    listMonitors()
+      .then((items) => {
+        if (!active) return;
+        const next = items.length ? items : [];
+        setMonitors(next);
+        if (next.length && !next.some((m) => Number(m.id) === Number(monitorIdRef.current))) {
+          handleMonitorChange(next[0].id);
+        }
+      })
+      .catch((err) => {
+        if (err.unauthorized) onLogout();
+      });
+    getPrivacyState()
+      .then((state) => active && setPrivacyOn(Boolean(state.enabled)))
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let lastHash = "";
+    let primed = false;
+    const poll = async () => {
+      try {
+        const data = await getClipboard();
+        if (!active) return;
+        if (!data.enabled) {
+          lastHash = "";
+          primed = false;
+          return;
+        }
+        if (data.hash && data.hash !== lastHash && data.text) {
+          const shouldOffer = primed;
+          lastHash = data.hash;
+          primed = true;
+          if (shouldOffer && navigator.clipboard?.writeText) {
+            await navigator.clipboard.writeText(data.text);
+          }
+        }
+      } catch (err) {
+        if (err.unauthorized) onLogout();
+      }
+    };
+    const timer = setInterval(poll, 1800);
+    poll();
+    return () => {
+      active = false;
+      clearInterval(timer);
+    };
+  }, [onLogout]);
 
   // ---- Gestures (touch + mouse for desktop testing) ----------------------
   useEffect(() => {
@@ -744,9 +879,17 @@ export default function LiveUse({
         {shot ? (
           <img
             ref={imgRef}
-            src={shot.image}
+            src={streamUrl || shot.image}
             alt="Live computer screen"
             draggable={false}
+            onError={() => {
+              if (autoRef.current) {
+                setAuto(false);
+                autoRef.current = false;
+                setStreamUrl("");
+                setStatus({ text: "Stream stopped.", state: "error" });
+              }
+            }}
             onLoad={() => {
               clampPan();
               apply();
@@ -826,6 +969,23 @@ export default function LiveUse({
                 <IconLogout className="h-[18px] w-[18px]" />
               </button>
             )}
+            {monitors.length > 1 && (
+              <label className="flex h-11 items-center gap-1.5 rounded-[2px] border border-line bg-black/50 px-2 text-silver">
+                <IconMonitor className="h-[16px] w-[16px] shrink-0" />
+                <select
+                  value={monitorId}
+                  onChange={(e) => handleMonitorChange(e.target.value)}
+                  className="h-full max-w-[112px] bg-transparent font-mono text-[0.66rem] uppercase tracking-stamp text-silver outline-none"
+                  aria-label="Monitor"
+                >
+                  {monitors.map((monitor) => (
+                    <option key={monitor.id} value={monitor.id} className="bg-black text-ink">
+                      {monitor.label || `Monitor ${monitor.id}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
             <button
               onClick={() => zoomTo(1, undefined, undefined, true)}
               className="grid h-11 min-w-[54px] place-items-center rounded-[2px] border border-line bg-black/50 px-2 font-mono text-[0.68rem] tracking-stamp text-silver transition-colors hover:text-ink"
@@ -844,17 +1004,33 @@ export default function LiveUse({
             </button>
             <button
               onClick={toggleAuto}
-              className={`flex h-11 items-center gap-1.5 rounded-[2px] border px-3 font-mono text-[0.66rem] uppercase tracking-stamp transition-colors ${
+              className={`grid h-11 w-11 place-items-center rounded-[2px] border transition-colors ${
                 auto
                   ? "border-ink/60 bg-ink/10 text-ink"
                   : "border-line bg-black/50 text-silver hover:text-ink"
               }`}
               aria-pressed={auto}
-              aria-label="Auto refresh"
+              aria-label="Auto stream"
+              title="Auto stream"
             >
-              <IconLive className="h-[15px] w-[15px]" />
-              Auto
+              <IconLive className="h-[17px] w-[17px]" />
             </button>
+            {isOwner && (
+              <button
+                onClick={togglePrivacy}
+                disabled={privacyBusy}
+                className={`grid h-11 w-11 place-items-center rounded-[2px] border transition-colors disabled:opacity-50 ${
+                  privacyOn
+                    ? "border-ink bg-ink text-[#08080a]"
+                    : "border-line bg-black/50 text-silver hover:text-ink"
+                }`}
+                aria-pressed={privacyOn}
+                aria-label="Privacy Mode"
+                title="Privacy Mode"
+              >
+                <IconLock className="h-[17px] w-[17px]" />
+              </button>
+            )}
           </div>
         </div>
         <div className="flex min-w-0 items-center gap-2 font-mono text-[0.66rem] text-silver">

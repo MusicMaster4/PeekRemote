@@ -232,6 +232,7 @@
                 </label>
 
                 <button id="rerun-setup" class="btn btn-ghost full">Re-run setup</button>
+                <button id="view-devices" class="btn btn-ghost full">View Connected Devices</button>
               </div>
 
               <div class="side-divider"></div>
@@ -243,6 +244,14 @@
                   <button id="update-check" class="btn btn-ghost btn-sm">Check now</button>
                   <button id="update-action" class="btn btn-solid btn-sm" hidden>Download</button>
                 </div>
+
+                <label class="toggle-row update-toggle">
+                  <span>
+                    <span class="toggle-title">Clipboard to phone</span>
+                    <span class="toggle-sub mono small muted">Copy PC text to the phone automatically.</span>
+                  </span>
+                  <input type="checkbox" id="set-clip-sync" class="switch" />
+                </label>
               </div>
             </div>
           </div>
@@ -252,6 +261,26 @@
           <span id="footer-version">—</span>
           <a href="#" id="repo-link">GitHub ↗</a>
         </footer>
+      </section>
+
+      <!-- ======================= DEVICES ======================= -->
+      <section id="devices" class="view devices" hidden>
+        <div class="devices-shell">
+          <div class="devices-head">
+            <div>
+              <p class="card-title mono small muted">Paired devices</p>
+              <h1 class="display">Connected Devices</h1>
+              <p class="lead">Rename phones and tablets that have paired with this computer.</p>
+            </div>
+            <div class="actions-row devices-actions">
+              <button id="devices-refresh" class="btn btn-ghost btn-sm">Refresh</button>
+              <button id="devices-back" class="btn btn-solid btn-sm">Back</button>
+            </div>
+          </div>
+          <div id="devices-list" class="devices-list">
+            <div class="status-card mono small muted">Loading devices...</div>
+          </div>
+        </div>
       </section>
     </main>
 

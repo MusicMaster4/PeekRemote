@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Peek Remote Privacy</title>
+    <style>
+      html,
+      body {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        overflow: hidden;
+        background: #000;
+        cursor: none;
+      }
+      img {
+        width: 100vw;
+        height: 100vh;
+        object-fit: cover;
+        display: block;
+        user-select: none;
+        -webkit-user-drag: none;
+      }
+    </style>
+  </head>
+  <body>
+    <img id="standby" alt="" />
+    <script>
+      const params = new URLSearchParams(location.search);
+      document.getElementById("standby").src = params.get("img") || "";
+    </script>
+  </body>
+</html>

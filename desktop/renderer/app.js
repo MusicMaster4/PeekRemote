@@ -45,6 +45,7 @@ async function boot() {
   // Settings reflect saved config
   $("#set-autostart").checked = info.config.autoStart;
   $("#set-autoupdate").checked = info.config.autoCheckUpdates;
+  $("#set-clip-sync").checked = Boolean(info.config.clipboardSync);
 
   wireGlobalEvents();
 
@@ -65,6 +66,7 @@ function wireGlobalEvents() {
   });
 
   window.peek.onUpdateStatus(handleUpdateStatus);
+  window.peek.onShowPairing?.(() => showPanel());
 
   $("#repo-link").addEventListener("click", (e) => {
     e.preventDefault();
@@ -337,6 +339,98 @@ function showPanel(animate = false) {
   syncUpdateCard();
 }
 
+function showDevices() {
+  showView("devices");
+  loadDevices();
+}
+
+async function loadDevices() {
+  const list = $("#devices-list");
+  list.innerHTML = `<div class="status-card mono small muted">Loading devices...</div>`;
+  const res = await window.peek.listDevices();
+  if (!res.ok) {
+    list.innerHTML = `<div class="status-card mono small danger">${escapeHtml(
+      res.message || "Could not load devices."
+    )}</div>`;
+    return;
+  }
+  renderDevices(res.devices || []);
+}
+
+function renderDevices(devices) {
+  const list = $("#devices-list");
+  if (!devices.length) {
+    list.innerHTML = `<div class="status-card mono small muted">No paired devices yet. Pair a phone with the QR code first.</div>`;
+    return;
+  }
+  list.innerHTML = devices.map(deviceRowHtml).join("");
+  $$(".device-save").forEach((button) => {
+    button.addEventListener("click", () => saveDeviceName(button.dataset.deviceId));
+  });
+  $$(".device-name-input").forEach((input) => {
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter") saveDeviceName(input.dataset.deviceId);
+    });
+  });
+}
+
+function deviceRowHtml(device) {
+  const active = Number(device.active_sessions || 0);
+  const name = device.name || device.default_name || "Device";
+  const meta = [
+    device.default_name && device.default_name !== name ? `Default: ${device.default_name}` : "",
+    device.last_ip ? `IP ${device.last_ip}` : "",
+    device.last_seen ? `Last seen ${formatDeviceTime(device.last_seen)}` : "",
+  ]
+    .filter(Boolean)
+    .join(" · ");
+  return `
+    <div class="device-row" data-device-row="${escapeHtml(device.id)}">
+      <div class="device-main">
+        <div class="device-title-row">
+          <input class="device-name-input" data-device-id="${escapeHtml(
+            device.id
+          )}" value="${escapeHtml(name)}" maxlength="60" aria-label="Device name" />
+          <span class="device-pill">${escapeHtml(device.type || "device")}</span>
+          <span class="device-pill ${active ? "active" : ""}">${active ? `${active} active` : "offline"}</span>
+        </div>
+        <div class="device-meta mono small">${escapeHtml(meta || device.user_agent || "")}</div>
+      </div>
+      <button class="btn btn-ghost btn-sm device-save" data-device-id="${escapeHtml(device.id)}">Save</button>
+    </div>
+  `;
+}
+
+function formatDeviceTime(value) {
+  const date = new Date(Number(value) * 1000);
+  if (Number.isNaN(date.getTime())) return "recently";
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  }).format(date);
+}
+
+async function saveDeviceName(deviceId) {
+  const input = $(`.device-name-input[data-device-id="${cssEscape(deviceId)}"]`);
+  if (!input) return;
+  const button = $(`.device-save[data-device-id="${cssEscape(deviceId)}"]`);
+  const previous = button.textContent;
+  button.disabled = true;
+  button.textContent = "Saving";
+  const res = await window.peek.renameDevice({ id: deviceId, name: input.value });
+  button.disabled = false;
+  if (!res.ok) {
+    button.textContent = "Error";
+    setTimeout(() => (button.textContent = previous), 1200);
+    window.alert(res.message || "Could not rename device.");
+    return;
+  }
+  button.textContent = "Saved";
+  setTimeout(() => (button.textContent = "Save"), 1200);
+}
+
 async function loadConnect() {
   stopQrTimer();
   const wrap = $("#qr-wrap");
@@ -440,6 +534,14 @@ function wirePanel() {
   $("#set-autoupdate").addEventListener("change", (e) =>
     window.peek.setAutoCheckUpdates(e.target.checked)
   );
+  $("#set-clip-sync").addEventListener("change", async (e) => {
+    const requested = e.target.checked;
+    const res = await window.peek.setClipboardSync(requested);
+    if (!res.ok) {
+      e.target.checked = !requested;
+      window.alert(res.message || "Could not change clipboard sync.");
+    }
+  });
 
   $("#rerun-setup").addEventListener("click", async () => {
     await window.peek.restartOnboarding();
@@ -449,6 +551,10 @@ function wirePanel() {
     setAutoStartChoice($("#set-autostart").checked);
     showOnboarding();
   });
+
+  $("#view-devices").addEventListener("click", showDevices);
+  $("#devices-back").addEventListener("click", () => showPanel());
+  $("#devices-refresh").addEventListener("click", loadDevices);
 
   $("#update-check").addEventListener("click", async () => {
     const button = $("#update-check");
@@ -598,6 +704,11 @@ function escapeHtml(str) {
     /[&<>"']/g,
     (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])
   );
+}
+
+function cssEscape(str) {
+  if (window.CSS && typeof window.CSS.escape === "function") return window.CSS.escape(String(str));
+  return String(str).replace(/[^a-zA-Z0-9_-]/g, "\\$&");
 }
 
 // ---------------------------------------------------------------- init

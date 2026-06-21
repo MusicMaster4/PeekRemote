@@ -2,6 +2,9 @@
 
 const path = require("path");
 const http = require("http");
+const crypto = require("crypto");
+const { execFile } = require("child_process");
+const { pathToFileURL } = require("url");
 const {
   app,
   BrowserWindow,
@@ -21,12 +24,17 @@ const { Backend } = require("./backend");
 const { setupUpdater } = require("./updater");
 
 const backend = new Backend();
+const desktopApiToken = crypto.randomBytes(32).toString("hex");
 let win = null;
 let tray = null;
 let updater = null;
 let isQuitting = false;
+let accessPaused = false;
 let crashRestarts = 0;
 let singleInstanceHandlerRegistered = false;
+let privacyPollTimer = null;
+let privacyOverlays = [];
+let appliedPrivacyEnabled = false;
 
 // Icons live in build/ during dev, but build/ is buildResources and isn't packed
 // into the asar — in the installed app they're shipped to resources/ via
@@ -80,7 +88,12 @@ async function init() {
   registerIpc();
 
   backend.on("log", (line) => sendToRenderer("backend:log", line));
-  backend.on("ready", ({ port }) => sendToRenderer("backend:state", { running: true, port }));
+  backend.on("ready", ({ port }) => {
+    sendToRenderer("backend:state", { running: true, port });
+    accessPaused = false;
+    rebuildTrayMenu();
+    startPrivacyPolling();
+  });
   backend.on("exit", onBackendExit);
 
   const c = config.load();
@@ -173,8 +186,26 @@ function createTray() {
     return;
   }
   tray.setToolTip("Peek Remote");
+  rebuildTrayMenu();
+  tray.on("click", () => showWindow());
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function rebuildTrayMenu() {
+  if (!tray) return;
+  const running = backend.isRunning() && !accessPaused;
   const menu = Menu.buildFromTemplate([
     { label: "Open Peek Remote", click: () => showWindow() },
+    { label: "Show QR", enabled: running, click: () => showPairing() },
+    { label: "Copy URL", enabled: running, click: () => copyPairingUrl() },
+    { type: "separator" },
+    {
+      label: running ? "Pause Remote Access" : "Resume Remote Access",
+      click: () => toggleRemoteAccess(!running),
+    },
     { type: "separator" },
     {
       label: "Quit (stops remote access)",
@@ -185,11 +216,6 @@ function createTray() {
     },
   ]);
   tray.setContextMenu(menu);
-  tray.on("click", () => showWindow());
-}
-
-function clamp(value, min, max) {
-  return Math.max(min, Math.min(max, value));
 }
 
 function showWindow() {
@@ -197,6 +223,37 @@ function showWindow() {
   if (win.isMinimized()) win.restore();
   win.show();
   win.focus();
+}
+
+function showPairing() {
+  showWindow();
+  sendToRenderer("ui:show-pairing", {});
+}
+
+async function copyPairingUrl() {
+  const res = await fetchConnectInfo();
+  const url = res.ok && res.info ? res.info.app_url || res.info.connect_url : "";
+  if (url) clipboard.writeText(url);
+}
+
+async function toggleRemoteAccess(enabled) {
+  if (enabled) {
+    accessPaused = false;
+    rebuildTrayMenu();
+    try {
+      await startBackend();
+    } catch (err) {
+      console.error("[main] resume failed:", err);
+    }
+    return;
+  }
+  accessPaused = true;
+  rebuildTrayMenu();
+  await setPrivacyOverlay(false);
+  stopPrivacyPolling();
+  await backend.stop();
+  sendToRenderer("backend:state", { running: false, paused: true });
+  rebuildTrayMenu();
 }
 
 function sendToRenderer(channel, payload) {
@@ -211,14 +268,19 @@ async function startBackend() {
     port: c.serverPort,
     dataDir: app.getPath("userData"),
     tailscalePath: tailscale.exePath(),
+    desktopApiToken,
+    clipboardSync: Boolean(c.clipboardSync),
   });
 }
 
 function onBackendExit({ code }) {
   sendToRenderer("backend:state", { running: false, code });
+  stopPrivacyPolling();
+  setPrivacyOverlay(false).catch((err) => console.error("[main] privacy cleanup failed:", err));
+  rebuildTrayMenu();
   const c = config.load();
   // Auto-recover from an unexpected crash a few times (not while quitting).
-  if (!isQuitting && c.onboardingComplete && c.pin && crashRestarts < 3) {
+  if (!isQuitting && !accessPaused && c.onboardingComplete && c.pin && crashRestarts < 3) {
     crashRestarts += 1;
     setTimeout(() => {
       backend
@@ -227,6 +289,8 @@ function onBackendExit({ code }) {
           port: c.serverPort,
           dataDir: app.getPath("userData"),
           tailscalePath: tailscale.exePath(),
+          desktopApiToken,
+          clipboardSync: Boolean(c.clipboardSync),
         })
         .catch((err) => console.error("[main] restart failed:", err));
     }, 1500 * crashRestarts);
@@ -279,6 +343,184 @@ function fetchConnectInfo() {
       req.destroy();
       resolve({ ok: false, reason: "timeout" });
     });
+  });
+}
+
+function backendRequest(pathname, { method = "GET", body } = {}) {
+  return new Promise((resolve) => {
+    const port = backend.port;
+    if (!port || !backend.isRunning()) {
+      resolve({ ok: false, reason: "backend_down" });
+      return;
+    }
+    const payload = body === undefined ? null : JSON.stringify(body);
+    const req = http.request(
+      {
+        host: "127.0.0.1",
+        port,
+        path: pathname,
+        method,
+        timeout: 8000,
+        headers: {
+          "X-Peek-Desktop-Token": desktopApiToken,
+          ...(payload
+            ? {
+                "Content-Type": "application/json",
+                "Content-Length": Buffer.byteLength(payload),
+              }
+            : {}),
+        },
+      },
+      (res) => {
+        let responseBody = "";
+        res.on("data", (d) => (responseBody += d));
+        res.on("end", () => {
+          let data = {};
+          try {
+            data = responseBody ? JSON.parse(responseBody) : {};
+          } catch {
+            resolve({ ok: false, status: res.statusCode, reason: "bad_response" });
+            return;
+          }
+          resolve({ ok: res.statusCode >= 200 && res.statusCode < 300, status: res.statusCode, data });
+        });
+      }
+    );
+    req.on("error", () => resolve({ ok: false, reason: "request_failed" }));
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ ok: false, reason: "timeout" });
+    });
+    if (payload) req.write(payload);
+    req.end();
+  });
+}
+
+function startPrivacyPolling() {
+  stopPrivacyPolling();
+  syncPrivacyState();
+  privacyPollTimer = setInterval(syncPrivacyState, 750);
+}
+
+function stopPrivacyPolling() {
+  if (privacyPollTimer) clearInterval(privacyPollTimer);
+  privacyPollTimer = null;
+}
+
+async function syncPrivacyState() {
+  if (!backend.isRunning()) {
+    await setPrivacyOverlay(false);
+    return;
+  }
+  const res = await backendRequest("/api/privacy");
+  if (!res.ok) return;
+  const enabled = Boolean(res.data && res.data.enabled);
+  if (enabled !== appliedPrivacyEnabled) {
+    await setPrivacyOverlay(enabled);
+  }
+}
+
+function privacyImagePath() {
+  return app.isPackaged
+    ? path.join(process.resourcesPath, "privacy", "standby.jpg")
+    : path.join(__dirname, "..", "assets", "privacy", "standby.jpg");
+}
+
+function nativeWindowHandleToNumber(handle) {
+  return process.arch === "x64" || process.arch === "arm64"
+    ? Number(handle.readBigUInt64LE(0))
+    : handle.readUInt32LE(0);
+}
+
+function powershellPath() {
+  const root = process.env.SystemRoot || "C:\\Windows";
+  return path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
+}
+
+function excludeWindowFromCapture(window) {
+  if (process.platform !== "win32" || !window || window.isDestroyed()) return;
+  const hwnd = nativeWindowHandleToNumber(window.getNativeWindowHandle());
+  const script = `
+$ErrorActionPreference = 'SilentlyContinue'
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class PeekRemoteCaptureAffinity {
+  [DllImport("user32.dll")]
+  public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, UInt32 dwAffinity);
+}
+"@
+[PeekRemoteCaptureAffinity]::SetWindowDisplayAffinity([IntPtr]${hwnd}, 0x00000011) | Out-Null
+`;
+  const encoded = Buffer.from(script, "utf16le").toString("base64");
+  execFile(
+    powershellPath(),
+    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
+    { windowsHide: true, timeout: 3000 },
+    () => {}
+  );
+}
+
+async function setPrivacyOverlay(enabled) {
+  appliedPrivacyEnabled = Boolean(enabled);
+  if (!enabled) {
+    for (const overlay of privacyOverlays) {
+      if (!overlay.isDestroyed()) overlay.destroy();
+    }
+    privacyOverlays = [];
+    return;
+  }
+
+  const displays = screen.getAllDisplays();
+  const imageUrl = pathToFileURL(privacyImagePath()).toString();
+  const htmlPath = path.join(__dirname, "..", "renderer", "privacy.html");
+
+  for (const overlay of privacyOverlays) {
+    if (!overlay.isDestroyed()) overlay.destroy();
+  }
+  privacyOverlays = displays.map((display) => {
+    const { x, y, width, height } = display.bounds;
+    const overlay = new BrowserWindow({
+      x,
+      y,
+      width,
+      height,
+      frame: false,
+      resizable: false,
+      movable: false,
+      minimizable: false,
+      maximizable: false,
+      closable: false,
+      skipTaskbar: true,
+      show: false,
+      focusable: true,
+      fullscreenable: false,
+      alwaysOnTop: true,
+      backgroundColor: "#000000",
+      webPreferences: {
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+        backgroundThrottling: true,
+      },
+    });
+    overlay.setContentProtection(true);
+    overlay.setIgnoreMouseEvents(true, { forward: true });
+    overlay.setAlwaysOnTop(true, "screen-saver", 1);
+    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
+    overlay.loadFile(htmlPath, { query: { img: imageUrl } });
+    overlay.once("ready-to-show", () => {
+      overlay.setBounds({ x, y, width, height });
+      overlay.setContentProtection(true);
+      overlay.setAlwaysOnTop(true, "screen-saver", 1);
+      excludeWindowFromCapture(overlay);
+      overlay.showInactive();
+      overlay.moveTop();
+    });
+    overlay.on("closed", () => {
+      privacyOverlays = privacyOverlays.filter((item) => item !== overlay);
+    });
+    return overlay;
   });
 }
 
@@ -335,7 +577,20 @@ function registerIpc() {
     return { ok: true };
   });
 
+  ipcMain.handle("config:setClipboardSync", async (_e, enabled) => {
+    const next = Boolean(enabled);
+    config.save({ clipboardSync: next });
+    if (!backend.isRunning()) return { ok: true, enabled: next };
+    const res = await backendRequest("/api/clipboard-sync", {
+      method: "POST",
+      body: { enabled: next },
+    });
+    if (!res.ok) return { ok: false, message: res.reason || "Could not update clipboard sync." };
+    return { ok: true, enabled: Boolean(res.data.enabled) };
+  });
+
   ipcMain.handle("backend:restart", async () => {
+    accessPaused = false;
     await backend.stop();
     await startBackend();
     return { ok: true, port: backend.port };
@@ -344,6 +599,27 @@ function registerIpc() {
   ipcMain.handle("backend:logs", () => backend.recentLogs());
 
   ipcMain.handle("connect:info", () => fetchConnectInfo());
+
+  ipcMain.handle("devices:list", async () => {
+    const res = await backendRequest("/api/devices");
+    if (!res.ok) return { ok: false, message: res.reason || "Could not load devices." };
+    return { ok: true, devices: res.data.devices || [] };
+  });
+
+  ipcMain.handle("devices:rename", async (_e, { id, name }) => {
+    const safeId = encodeURIComponent(String(id || ""));
+    const res = await backendRequest(`/api/devices/${safeId}`, {
+      method: "PATCH",
+      body: { name: String(name || "") },
+    });
+    if (!res.ok) {
+      return {
+        ok: false,
+        message: (res.data && (res.data.detail || res.data.message)) || res.reason || "Could not rename device.",
+      };
+    }
+    return { ok: true, device: res.data.device };
+  });
 
   ipcMain.handle("update:check", () => updater.check());
   ipcMain.handle("update:download", () => updater.download());
@@ -376,6 +652,8 @@ app.on("before-quit", async (e) => {
   if (backend.isRunning()) {
     e.preventDefault();
     isQuitting = true;
+    stopPrivacyPolling();
+    await setPrivacyOverlay(false);
     await backend.stop();
     app.exit(0);
   }

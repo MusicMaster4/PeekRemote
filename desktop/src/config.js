@@ -14,6 +14,7 @@ const DEFAULTS = {
   onboardingComplete: false,
   autoStart: false,
   autoCheckUpdates: true,
+  clipboardSync: false,
   serverPort: 1739,
 };
 
@@ -64,6 +65,7 @@ function publicState() {
     onboardingComplete: Boolean(c.onboardingComplete),
     autoStart: Boolean(c.autoStart),
     autoCheckUpdates: Boolean(c.autoCheckUpdates),
+    clipboardSync: Boolean(c.clipboardSync),
     serverPort: c.serverPort || DEFAULTS.serverPort,
   };
 }

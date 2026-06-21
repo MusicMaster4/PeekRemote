@@ -14,6 +14,15 @@ async function req(path, options = {}) {
   return fetch(BASE + path, { credentials: "include", ...options });
 }
 
+function query(params) {
+  const search = new URLSearchParams();
+  Object.entries(params).forEach(([key, value]) => {
+    if (value !== undefined && value !== null && value !== "") search.set(key, String(value));
+  });
+  const text = search.toString();
+  return text ? `?${text}` : "";
+}
+
 async function detail(res, fallback) {
   const data = await res.json().catch(() => ({}));
   return data.detail || fallback;
@@ -32,6 +41,9 @@ async function screenshotFromResponse(res) {
     filename: res.headers.get("X-Screenshot-Filename") || "screenshot.jpg",
     width: headerInt(res, "X-Screenshot-Width"),
     height: headerInt(res, "X-Screenshot-Height"),
+    monitorId: headerInt(res, "X-Screenshot-Monitor"),
+    monitorLeft: headerInt(res, "X-Screenshot-Monitor-Left"),
+    monitorTop: headerInt(res, "X-Screenshot-Monitor-Top"),
     bytes: blob.size,
     mediaType: blob.type,
   };
@@ -76,6 +88,40 @@ export async function revokeSession(pubId) {
   return res.json();
 }
 
+export async function listMonitors() {
+  const res = await req("/api/monitors");
+  if (res.status === 401) throw unauthorized();
+  if (!res.ok) throw new Error(await detail(res, "Couldn't list monitors."));
+  const data = await res.json();
+  return data.monitors || [];
+}
+
+export async function getClipboard() {
+  const res = await req("/api/clipboard");
+  if (res.status === 401) throw unauthorized();
+  if (!res.ok) throw new Error(await detail(res, "Couldn't read the computer clipboard."));
+  return res.json();
+}
+
+export async function getPrivacyState() {
+  const res = await req("/api/privacy");
+  if (res.status === 401) throw unauthorized();
+  if (!res.ok) throw new Error(await detail(res, "Couldn't read Privacy Mode."));
+  return res.json();
+}
+
+export async function setPrivacyMode(enabled) {
+  const res = await req("/api/privacy", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ enabled }),
+  });
+  if (res.status === 401) throw unauthorized();
+  if (res.status === 403) throw new Error("Only the owner phone can change Privacy Mode.");
+  if (!res.ok) throw new Error(await detail(res, "Couldn't change Privacy Mode."));
+  return res.json();
+}
+
 export async function login(pin) {
   const res = await req("/api/login", {
     method: "POST",
@@ -94,8 +140,12 @@ export async function logout() {
   }
 }
 
-export async function captureScreenshot(profile = "photo") {
-  const res = await req(`/api/screenshots/raw?profile=${encodeURIComponent(profile)}`, {
+export function screenshotStreamUrl({ profile = "live", monitor, fps = 24, nonce = Date.now() } = {}) {
+  return `${BASE}/api/screenshots/stream${query({ profile, monitor, fps, n: nonce })}`;
+}
+
+export async function captureScreenshot(profile = "photo", monitor) {
+  const res = await req(`/api/screenshots/raw${query({ profile, monitor })}`, {
     method: "POST",
   });
   if (res.status === 401) throw unauthorized();

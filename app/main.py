@@ -22,15 +22,15 @@ from typing import Literal
 from asyncio.subprocess import PIPE, Process
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.concurrency import run_in_threadpool
 from pydantic import BaseModel, Field, field_validator
 
-from . import connect, remote_input
+from . import clipboard, connect, devices, privacy, remote_input
 from .config import settings
 from .power import suspend_computer
-from .screenshot import capture_screen
+from .screenshot import capture_screen, list_monitors, monitor_for_id
 
 app = FastAPI(title="Peek Remote")
 
@@ -86,7 +86,9 @@ def _hidden_subprocess_kwargs() -> dict:
     }
 
 AUTH_COOKIE_NAME = "remote_console_auth"
+DEVICE_COOKIE_NAME = "remote_console_device"
 SESSION_SECONDS = 12 * 60 * 60
+DEVICE_COOKIE_SECONDS = 365 * 24 * 60 * 60
 SESSION_SECRET = secrets.token_hex(32)
 MAX_FAILED_ATTEMPTS = settings.max_failed_logins
 # Atraso crescente apos cada PIN errado, para frear brute-force mesmo antes do
@@ -153,12 +155,33 @@ class LoginRequest(BaseModel):
         return value.strip()
 
 
+class DeviceRenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=60)
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: str) -> str:
+        clean = re.sub(r"\s+", " ", value).strip()
+        if not clean:
+            raise ValueError("Device name cannot be empty.")
+        return clean
+
+
+class PrivacyRequest(BaseModel):
+    enabled: bool
+
+
+class ClipboardSyncRequest(BaseModel):
+    enabled: bool
+
+
 class InputRequest(BaseModel):
     action: Literal["click", "drag", "scroll", "key", "hotkey", "text"]
     x: int = 0
     y: int = 0
     x2: int = 0
     y2: int = 0
+    monitor_id: int | None = Field(None, ge=1, le=64)
     button: Literal["left", "right", "middle"] = "left"
     double: bool = False
     duration_ms: int = Field(450, ge=50, le=5000)
@@ -203,6 +226,7 @@ class SessionInfo:
     client_ip: str
     user_agent: str
     is_owner: bool
+    device_id: str
 
 
 # Registro de sessões vivas, indexado pelo token do cookie. Mantê-lo no servidor
@@ -210,7 +234,7 @@ class SessionInfo:
 active_sessions: dict[str, SessionInfo] = {}
 capture_lock = asyncio.Lock()
 latest_screenshot = None
-latest_screenshot_key: tuple[str, int, int | None] | None = None
+latest_screenshot_key: tuple[str, int, int | None, int | None] | None = None
 latest_screenshot_at = 0.0
 
 
@@ -244,6 +268,14 @@ def _create_session(request: Request) -> str:
     token = secrets.token_urlsafe(32)
     now = time.time()
     is_owner = not any(s.is_owner for s in active_sessions.values())
+    device_id = request.cookies.get(DEVICE_COOKIE_NAME) or ""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", device_id):
+        device_id = secrets.token_urlsafe(12)
+    devices.touch_device(
+        device_id,
+        request.headers.get("user-agent", "") or "",
+        _client_key(request),
+    )
     active_sessions[token] = SessionInfo(
         token=token,
         pub_id=secrets.token_urlsafe(6),
@@ -252,6 +284,7 @@ def _create_session(request: Request) -> str:
         client_ip=_client_key(request),
         user_agent=(request.headers.get("user-agent", "") or "")[:200],
         is_owner=is_owner,
+        device_id=device_id,
     )
     return token
 
@@ -323,15 +356,25 @@ def _is_valid_pin(pin: str) -> bool:
 
 
 def _set_auth_cookie(response: Response, request: Request, token: str) -> None:
+    secure = request.url.scheme == "https" or request.headers.get("x-forwarded-proto") == "https"
     response.set_cookie(
         AUTH_COOKIE_NAME,
         token,
         max_age=SESSION_SECONDS,
         httponly=True,
-        secure=request.url.scheme == "https"
-        or request.headers.get("x-forwarded-proto") == "https",
+        secure=secure,
         samesite="strict",
     )
+    session = active_sessions.get(token)
+    if session is not None:
+        response.set_cookie(
+            DEVICE_COOKIE_NAME,
+            session.device_id,
+            max_age=DEVICE_COOKIE_SECONDS,
+            httponly=True,
+            secure=secure,
+            samesite="strict",
+        )
 
 
 def current_login(request: Request) -> str | None:
@@ -356,17 +399,46 @@ def require_owner(request: Request) -> SessionInfo:
     return session
 
 
-def _capture_options(profile: Literal["photo", "live"]) -> tuple[str, int, int | None]:
+def _desktop_authorized(request: Request) -> bool:
+    token = settings.desktop_api_token
+    provided = request.headers.get("x-peek-desktop-token", "")
+    return bool(token) and secrets.compare_digest(token, provided)
+
+
+def require_desktop_or_owner(request: Request) -> SessionInfo | None:
+    if _desktop_authorized(request):
+        return None
+    return require_owner(request)
+
+
+def require_desktop_or_auth(request: Request) -> SessionInfo | None:
+    if _desktop_authorized(request):
+        return None
+    session = _current_session(request)
+    if session is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Login required.")
+    return session
+
+
+def _capture_options(
+    profile: Literal["photo", "live"], monitor_id: int | None = None
+) -> tuple[str, int, int | None, int | None]:
     if profile == "live":
         return (
             settings.screenshot_format,
             settings.live_screenshot_quality,
             settings.live_max_width,
+            monitor_id,
         )
-    return (settings.screenshot_format, settings.screenshot_quality, None)
+    return (settings.screenshot_format, settings.screenshot_quality, None, monitor_id)
 
 
-async def _capture_cached(profile: Literal["photo", "live"]):
+async def _capture_cached(
+    profile: Literal["photo", "live"],
+    monitor_id: int | None = None,
+    *,
+    use_cache: bool = True,
+):
     """Captura serializada, com reuso curto para evitar frames duplicados.
 
     Captura de tela e codificacao sao o caminho mais caro do app. O lock evita
@@ -375,10 +447,12 @@ async def _capture_cached(profile: Literal["photo", "live"]):
     """
     global latest_screenshot, latest_screenshot_key, latest_screenshot_at
 
-    key = _capture_options(profile)
+    key = _capture_options(profile, monitor_id)
     now = time.monotonic()
     cache_seconds = settings.screenshot_cache_ms / 1000
     if (
+        use_cache
+        and
         latest_screenshot is not None
         and latest_screenshot_key == key
         and cache_seconds > 0
@@ -389,6 +463,8 @@ async def _capture_cached(profile: Literal["photo", "live"]):
     async with capture_lock:
         now = time.monotonic()
         if (
+            use_cache
+            and
             latest_screenshot is not None
             and latest_screenshot_key == key
             and cache_seconds > 0
@@ -396,12 +472,13 @@ async def _capture_cached(profile: Literal["photo", "live"]):
         ):
             return latest_screenshot
 
-        image_format, quality, max_width = key
+        image_format, quality, max_width, selected_monitor = key
         screenshot = await run_in_threadpool(
             capture_screen,
             image_format=image_format,
             quality=quality,
             max_width=max_width,
+            monitor_id=selected_monitor,
         )
         latest_screenshot = screenshot
         latest_screenshot_key = key
@@ -409,20 +486,29 @@ async def _capture_cached(profile: Literal["photo", "live"]):
         return screenshot
 
 
+def _monitor_xy(x: int, y: int, monitor_id: int | None) -> tuple[int, int]:
+    monitor = monitor_for_id(monitor_id)
+    return int(x) + monitor.left, int(y) + monitor.top
+
+
 def _perform_input(payload: InputRequest) -> None:
     if payload.action == "click":
-        remote_input.click(payload.x, payload.y, payload.button, payload.double)
+        x, y = _monitor_xy(payload.x, payload.y, payload.monitor_id)
+        remote_input.click(x, y, payload.button, payload.double)
     elif payload.action == "drag":
+        x1, y1 = _monitor_xy(payload.x, payload.y, payload.monitor_id)
+        x2, y2 = _monitor_xy(payload.x2, payload.y2, payload.monitor_id)
         remote_input.drag(
-            payload.x,
-            payload.y,
-            payload.x2,
-            payload.y2,
+            x1,
+            y1,
+            x2,
+            y2,
             payload.button,
             payload.duration_ms,
         )
     elif payload.action == "scroll":
-        remote_input.scroll(payload.x, payload.y, payload.dy)
+        x, y = _monitor_xy(payload.x, payload.y, payload.monitor_id)
+        remote_input.scroll(x, y, payload.dy)
     elif payload.action == "key":
         if not payload.key:
             raise ValueError("No key provided.")
@@ -443,6 +529,9 @@ def _screenshot_headers(screenshot) -> dict[str, str]:
         "X-Screenshot-Filename": screenshot.filename,
         "X-Screenshot-Width": str(screenshot.width),
         "X-Screenshot-Height": str(screenshot.height),
+        "X-Screenshot-Monitor": str(screenshot.monitor_id),
+        "X-Screenshot-Monitor-Left": str(screenshot.monitor_left),
+        "X-Screenshot-Monitor-Top": str(screenshot.monitor_top),
     }
 
 
@@ -531,6 +620,8 @@ async def _prepare_connect() -> None:
 async def on_startup() -> None:
     _setup_audit_log()
     remote_input.ensure_dpi_aware()
+    clipboard.set_enabled(settings.clipboard_sync_enabled)
+    clipboard.start_monitor()
     asyncio.create_task(_prepare_connect())
     if settings.cloudflared_path:
         asyncio.create_task(_start_cloudflared())
@@ -538,6 +629,8 @@ async def on_startup() -> None:
 
 @app.on_event("shutdown")
 async def on_shutdown() -> None:
+    privacy.set_enabled(False)
+    clipboard.stop_monitor()
     await _stop_cloudflared()
 
 
@@ -555,6 +648,104 @@ async def session_status(request: Request) -> JSONResponse:
             "os": HOST_OS,
         }
     )
+
+
+def _active_device_counts() -> dict[str, int]:
+    counts: dict[str, int] = {}
+    for session in active_sessions.values():
+        counts[session.device_id] = counts.get(session.device_id, 0) + 1
+    return counts
+
+
+def _privacy_payload() -> dict:
+    current = privacy.state()
+    return {
+        "enabled": current.enabled,
+        "input_blocked": current.input_blocked,
+        "platform": current.platform,
+        "message": current.message,
+    }
+
+
+@app.get("/api/devices")
+async def list_paired_devices(
+    request: Request, _: SessionInfo | None = Depends(require_desktop_or_owner)
+) -> JSONResponse:
+    return JSONResponse({"devices": devices.list_devices(_active_device_counts())})
+
+
+@app.patch("/api/devices/{device_id}")
+async def rename_paired_device(
+    device_id: str,
+    payload: DeviceRenameRequest,
+    request: Request,
+    _: SessionInfo | None = Depends(require_desktop_or_owner),
+) -> JSONResponse:
+    device = devices.rename_device(device_id, payload.name)
+    if device is None:
+        raise HTTPException(status_code=404, detail="Device not found.")
+    device["active_sessions"] = _active_device_counts().get(device_id, 0)
+    _audit("DEVICE_RENAMED", request, device=device_id)
+    return JSONResponse({"device": device})
+
+
+@app.get("/api/monitors")
+async def monitors(_: str = Depends(require_auth)) -> JSONResponse:
+    return JSONResponse(
+        {
+            "monitors": [
+                {
+                    "id": monitor.id,
+                    "label": f"Monitor {monitor.id}",
+                    "left": monitor.left,
+                    "top": monitor.top,
+                    "width": monitor.width,
+                    "height": monitor.height,
+                    "primary": monitor.primary,
+                }
+                for monitor in list_monitors()
+            ]
+        }
+    )
+
+
+@app.get("/api/clipboard")
+async def latest_clipboard(_: str = Depends(require_auth)) -> JSONResponse:
+    return JSONResponse(clipboard.latest())
+
+
+@app.get("/api/clipboard-sync")
+async def get_clipboard_sync(
+    request: Request, _: SessionInfo | None = Depends(require_desktop_or_owner)
+) -> JSONResponse:
+    return JSONResponse({"enabled": clipboard.is_enabled()})
+
+
+@app.post("/api/clipboard-sync")
+async def set_clipboard_sync(
+    payload: ClipboardSyncRequest,
+    request: Request,
+    _: SessionInfo | None = Depends(require_desktop_or_owner),
+) -> JSONResponse:
+    enabled = await run_in_threadpool(clipboard.set_enabled, payload.enabled)
+    _audit("CLIPBOARD_SYNC_CHANGED", request, enabled=enabled)
+    return JSONResponse({"enabled": enabled})
+
+
+@app.get("/api/privacy")
+async def get_privacy(
+    request: Request, _: SessionInfo | None = Depends(require_desktop_or_auth)
+) -> JSONResponse:
+    return JSONResponse(_privacy_payload())
+
+
+@app.post("/api/privacy")
+async def set_privacy(
+    payload: PrivacyRequest, request: Request, _: SessionInfo = Depends(require_owner)
+) -> JSONResponse:
+    current = await run_in_threadpool(privacy.set_enabled, payload.enabled)
+    _audit("PRIVACY_CHANGED", request, enabled=current.enabled, input_blocked=current.input_blocked)
+    return JSONResponse(_privacy_payload())
 
 
 @app.post("/api/login")
@@ -639,8 +830,9 @@ async def cancel_suspend(
 async def handle_screenshots(
     _: str = Depends(require_auth),
     profile: Literal["photo", "live"] = Query("photo"),
+    monitor: int | None = Query(None, ge=1, le=64),
 ) -> JSONResponse:
-    screenshot = await _capture_cached(profile)
+    screenshot = await _capture_cached(profile, monitor)
     image_base64 = base64.b64encode(screenshot.data).decode("ascii")
     return JSONResponse(
         {
@@ -650,6 +842,9 @@ async def handle_screenshots(
             "filename": screenshot.filename,
             "width": screenshot.width,
             "height": screenshot.height,
+            "monitor_id": screenshot.monitor_id,
+            "monitor_left": screenshot.monitor_left,
+            "monitor_top": screenshot.monitor_top,
         }
     )
 
@@ -658,12 +853,49 @@ async def handle_screenshots(
 async def handle_raw_screenshot(
     _: str = Depends(require_auth),
     profile: Literal["photo", "live"] = Query("photo"),
+    monitor: int | None = Query(None, ge=1, le=64),
 ) -> Response:
-    screenshot = await _capture_cached(profile)
+    screenshot = await _capture_cached(profile, monitor)
     return Response(
         screenshot.data,
         media_type=screenshot.media_type,
         headers=_screenshot_headers(screenshot),
+    )
+
+
+@app.get("/api/screenshots/stream")
+async def stream_screenshots(
+    _: str = Depends(require_auth),
+    profile: Literal["live"] = Query("live"),
+    monitor: int | None = Query(None, ge=1, le=64),
+    fps: int = Query(settings.stream_fps, ge=1, le=30),
+) -> StreamingResponse:
+    interval = 1 / max(1, min(int(fps), 30))
+
+    async def frames():
+        while True:
+            screenshot = await run_in_threadpool(
+                capture_screen,
+                image_format="jpeg",
+                quality=min(settings.live_screenshot_quality, 68),
+                max_width=settings.live_max_width,
+                monitor_id=monitor,
+            )
+            yield (
+                b"--frame\r\n"
+                b"Content-Type: image/jpeg\r\n"
+                + f"X-Screenshot-Width: {screenshot.width}\r\n".encode("ascii")
+                + f"X-Screenshot-Height: {screenshot.height}\r\n".encode("ascii")
+                + f"X-Screenshot-Monitor: {screenshot.monitor_id}\r\n\r\n".encode("ascii")
+                + screenshot.data
+                + b"\r\n"
+            )
+            await asyncio.sleep(interval)
+
+    return StreamingResponse(
+        frames(),
+        media_type="multipart/x-mixed-replace; boundary=frame",
+        headers={"Cache-Control": "no-store"},
     )
 
 
@@ -690,7 +922,7 @@ async def handle_input_screenshot(
         await run_in_threadpool(_perform_input, payload)
         if settings.post_input_capture_delay_ms:
             await asyncio.sleep(settings.post_input_capture_delay_ms / 1000)
-        screenshot = await _capture_cached("live")
+        screenshot = await _capture_cached("live", payload.monitor_id)
     except remote_input.InputUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except ValueError as exc:
@@ -783,8 +1015,14 @@ async def qr_login(request: Request, t: str | None = None) -> RedirectResponse:
 
 
 def _session_payload(session: SessionInfo, current_token: str) -> dict:
+    device = devices.get_device(session.device_id) or {}
     return {
         "id": session.pub_id,
+        "device_id": session.device_id,
+        "device_name": device.get("name") or device.get("default_name") or "",
+        "device_default_name": device.get("default_name") or "",
+        "device_type": device.get("type") or "device",
+        "device_model": device.get("model") or "",
         "created_at": datetime.fromtimestamp(session.created_at).isoformat(timespec="seconds"),
         "last_seen": datetime.fromtimestamp(session.last_seen).isoformat(timespec="seconds"),
         "client_ip": session.client_ip,

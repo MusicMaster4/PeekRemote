@@ -38,7 +38,7 @@ class Backend extends EventEmitter {
     return Boolean(this.child) && this.child.exitCode === null;
   }
 
-  async start({ pin, port, dataDir, tailscalePath }) {
+  async start({ pin, port, dataDir, tailscalePath, desktopApiToken, clipboardSync }) {
     if (this.isRunning() || this.starting) return this.port;
     this.starting = true;
     try {
@@ -52,6 +52,9 @@ class Backend extends EventEmitter {
         SERVER_PORT: String(this.port),
         QR_OPEN_BROWSER: "false",
         AUDIT_LOG_FILE: path.join(dataDir, "audit.log"),
+        APP_DATA_DIR: dataDir,
+        DESKTOP_API_TOKEN: desktopApiToken || "",
+        CLIPBOARD_SYNC_ENABLED: clipboardSync ? "true" : "false",
         PYTHONUNBUFFERED: "1",
         PYTHONUTF8: "1",
       };

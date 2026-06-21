@@ -51,6 +51,7 @@ _add("httptools", optional=True)
 _add("websockets", optional=True)
 _add("pydantic")
 _add("pydantic_settings", optional=True)
+_add("Quartz", optional=True)
 
 # Our own package is imported via the `app` namespace.
 hiddenimports += collect_submodules("app")

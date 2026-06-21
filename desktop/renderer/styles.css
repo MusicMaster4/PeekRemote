@@ -901,6 +901,91 @@ a {
   color: var(--silver);
 }
 
+/* ---- Devices view ---- */
+.devices {
+  padding: 34px 42px;
+  overflow: auto;
+}
+.devices-shell {
+  width: min(900px, 100%);
+  margin: auto;
+}
+.devices-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 24px;
+  margin-bottom: 18px;
+}
+.devices-head .display {
+  margin-bottom: 6px;
+}
+.devices-actions {
+  margin-top: 0;
+  flex: none;
+}
+.devices-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.device-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--panel);
+  padding: 14px;
+}
+.device-main {
+  min-width: 0;
+}
+.device-title-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+}
+.device-name-input {
+  min-width: 180px;
+  width: min(360px, 100%);
+  height: 38px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--bg-soft);
+  color: var(--ink);
+  padding: 0 10px;
+  font: 600 0.95rem var(--sans);
+  outline: none;
+}
+.device-name-input:focus {
+  border-color: var(--ink);
+}
+.device-pill {
+  flex: none;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 8px;
+  font-family: var(--mono);
+  font-size: 0.58rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.device-pill.active {
+  border-color: rgba(143, 184, 154, 0.6);
+  color: var(--ok);
+}
+.device-meta {
+  margin-top: 6px;
+  color: var(--muted);
+}
+.device-save {
+  min-width: 96px;
+}
+
 /* Reduced-motion: honor the OS setting (and keep idle work nil). */
 @media (prefers-reduced-motion: reduce) {
   * {

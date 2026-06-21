@@ -23,6 +23,8 @@ extraResources:
     to: icon.ico
   - from: build/icon.png
     to: icon.png
+  - from: assets/privacy/standby.jpg
+    to: privacy/standby.jpg
 
 # Auto-update source: GitHub Releases. electron-updater reads latest.yml /
 # latest-mac.yml from the release matching the running version.

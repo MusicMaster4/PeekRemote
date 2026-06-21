@@ -18,7 +18,8 @@ $user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
 $settings = New-ScheduledTaskSettingsSet `
   -AllowStartIfOnBatteries `
-  -ExecutionTimeLimit (New-TimeSpan -Seconds 0)
+  -ExecutionTimeLimit (New-TimeSpan -Seconds 0) `
+  -MultipleInstances Parallel
 
 function Register-PeekTask {
   param(

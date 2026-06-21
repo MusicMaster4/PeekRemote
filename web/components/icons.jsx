@@ -140,6 +140,24 @@ export function IconUsers({ className }) {
   );
 }
 
+export function IconLock({ className }) {
+  return (
+    <svg className={className} {...base}>
+      <rect x="5" y="10" width="14" height="11" rx="2" />
+      <path d="M8 10V7a4 4 0 0 1 8 0v3" />
+    </svg>
+  );
+}
+
+export function IconMonitor({ className }) {
+  return (
+    <svg className={className} {...base}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <path d="M8 20h8M12 16v4" />
+    </svg>
+  );
+}
+
 export function IconChevronLeft({ className }) {
   return (
     <svg className={className} {...base} strokeWidth={1.7}>

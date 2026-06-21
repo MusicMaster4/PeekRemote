@@ -292,19 +292,30 @@ def ensure_dpi_aware() -> None:
             pass
 
 
-def screen_size() -> tuple[int, int]:
+def screen_bounds() -> tuple[int, int, int, int]:
     if platform.system() == "Windows":
         user32 = ctypes.windll.user32
-        return int(user32.GetSystemMetrics(0)), int(user32.GetSystemMetrics(1))
-    # Fallback: deixa o clamp praticamente sem efeito.
-    return (1 << 30, 1 << 30)
+        return (
+            int(user32.GetSystemMetrics(76)),  # SM_XVIRTUALSCREEN
+            int(user32.GetSystemMetrics(77)),  # SM_YVIRTUALSCREEN
+            int(user32.GetSystemMetrics(78)),  # SM_CXVIRTUALSCREEN
+            int(user32.GetSystemMetrics(79)),  # SM_CYVIRTUALSCREEN
+        )
+    # Fallback: let non-Windows coordinate spaces include secondary displays
+    # with negative origins instead of forcing everything into the primary.
+    return (-(1 << 29), -(1 << 29), 1 << 30, 1 << 30)
+
+
+def screen_size() -> tuple[int, int]:
+    _, _, width, height = screen_bounds()
+    return width, height
 
 
 def _clamp_xy(x: int, y: int) -> tuple[int, int]:
-    width, height = screen_size()
+    left, top, width, height = screen_bounds()
     return (
-        max(0, min(int(x), width - 1)),
-        max(0, min(int(y), height - 1)),
+        max(left, min(int(x), left + width - 1)),
+        max(top, min(int(y), top + height - 1)),
     )
 
 

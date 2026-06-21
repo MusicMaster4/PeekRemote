@@ -107,7 +107,7 @@ export default function Sessions({ onClose, onLogout }) {
                 <div className="min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="truncate text-[0.92rem] font-semibold text-ink">
-                      {deviceLabel(s.user_agent)}
+                      {s.device_name || deviceLabel(s.user_agent)}
                     </span>
                     {s.is_owner && (
                       <span className="shrink-0 rounded-[2px] border border-line-strong px-1.5 py-0.5 font-mono text-[0.55rem] uppercase tracking-stamp text-silver">
