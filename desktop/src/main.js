@@ -3,8 +3,6 @@
 const path = require("path");
 const http = require("http");
 const crypto = require("crypto");
-const { execFile } = require("child_process");
-const { pathToFileURL } = require("url");
 const {
   app,
   BrowserWindow,
@@ -32,9 +30,6 @@ let isQuitting = false;
 let accessPaused = false;
 let crashRestarts = 0;
 let singleInstanceHandlerRegistered = false;
-let privacyPollTimer = null;
-let privacyOverlays = [];
-let appliedPrivacyEnabled = false;
 
 // Icons live in build/ during dev, but build/ is buildResources and isn't packed
 // into the asar — in the installed app they're shipped to resources/ via
@@ -92,7 +87,6 @@ async function init() {
     sendToRenderer("backend:state", { running: true, port });
     accessPaused = false;
     rebuildTrayMenu();
-    startPrivacyPolling();
   });
   backend.on("exit", onBackendExit);
 
@@ -249,8 +243,6 @@ async function toggleRemoteAccess(enabled) {
   }
   accessPaused = true;
   rebuildTrayMenu();
-  await setPrivacyOverlay(false);
-  stopPrivacyPolling();
   await backend.stop();
   sendToRenderer("backend:state", { running: false, paused: true });
   rebuildTrayMenu();
@@ -275,8 +267,6 @@ async function startBackend() {
 
 function onBackendExit({ code }) {
   sendToRenderer("backend:state", { running: false, code });
-  stopPrivacyPolling();
-  setPrivacyOverlay(false).catch((err) => console.error("[main] privacy cleanup failed:", err));
   rebuildTrayMenu();
   const c = config.load();
   // Auto-recover from an unexpected crash a few times (not while quitting).
@@ -393,134 +383,6 @@ function backendRequest(pathname, { method = "GET", body } = {}) {
     });
     if (payload) req.write(payload);
     req.end();
-  });
-}
-
-function startPrivacyPolling() {
-  stopPrivacyPolling();
-  syncPrivacyState();
-  privacyPollTimer = setInterval(syncPrivacyState, 750);
-}
-
-function stopPrivacyPolling() {
-  if (privacyPollTimer) clearInterval(privacyPollTimer);
-  privacyPollTimer = null;
-}
-
-async function syncPrivacyState() {
-  if (!backend.isRunning()) {
-    await setPrivacyOverlay(false);
-    return;
-  }
-  const res = await backendRequest("/api/privacy");
-  if (!res.ok) return;
-  const enabled = Boolean(res.data && res.data.enabled);
-  if (enabled !== appliedPrivacyEnabled) {
-    await setPrivacyOverlay(enabled);
-  }
-}
-
-function privacyImagePath() {
-  return app.isPackaged
-    ? path.join(process.resourcesPath, "privacy", "standby.jpg")
-    : path.join(__dirname, "..", "assets", "privacy", "standby.jpg");
-}
-
-function nativeWindowHandleToNumber(handle) {
-  return process.arch === "x64" || process.arch === "arm64"
-    ? Number(handle.readBigUInt64LE(0))
-    : handle.readUInt32LE(0);
-}
-
-function powershellPath() {
-  const root = process.env.SystemRoot || "C:\\Windows";
-  return path.join(root, "System32", "WindowsPowerShell", "v1.0", "powershell.exe");
-}
-
-function excludeWindowFromCapture(window) {
-  if (process.platform !== "win32" || !window || window.isDestroyed()) return;
-  const hwnd = nativeWindowHandleToNumber(window.getNativeWindowHandle());
-  const script = `
-$ErrorActionPreference = 'SilentlyContinue'
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-public static class PeekRemoteCaptureAffinity {
-  [DllImport("user32.dll")]
-  public static extern bool SetWindowDisplayAffinity(IntPtr hWnd, UInt32 dwAffinity);
-}
-"@
-[PeekRemoteCaptureAffinity]::SetWindowDisplayAffinity([IntPtr]${hwnd}, 0x00000011) | Out-Null
-`;
-  const encoded = Buffer.from(script, "utf16le").toString("base64");
-  execFile(
-    powershellPath(),
-    ["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
-    { windowsHide: true, timeout: 3000 },
-    () => {}
-  );
-}
-
-async function setPrivacyOverlay(enabled) {
-  appliedPrivacyEnabled = Boolean(enabled);
-  if (!enabled) {
-    for (const overlay of privacyOverlays) {
-      if (!overlay.isDestroyed()) overlay.destroy();
-    }
-    privacyOverlays = [];
-    return;
-  }
-
-  const displays = screen.getAllDisplays();
-  const imageUrl = pathToFileURL(privacyImagePath()).toString();
-  const htmlPath = path.join(__dirname, "..", "renderer", "privacy.html");
-
-  for (const overlay of privacyOverlays) {
-    if (!overlay.isDestroyed()) overlay.destroy();
-  }
-  privacyOverlays = displays.map((display) => {
-    const { x, y, width, height } = display.bounds;
-    const overlay = new BrowserWindow({
-      x,
-      y,
-      width,
-      height,
-      frame: false,
-      resizable: false,
-      movable: false,
-      minimizable: false,
-      maximizable: false,
-      closable: false,
-      skipTaskbar: true,
-      show: false,
-      focusable: true,
-      fullscreenable: false,
-      alwaysOnTop: true,
-      backgroundColor: "#000000",
-      webPreferences: {
-        contextIsolation: true,
-        nodeIntegration: false,
-        sandbox: true,
-        backgroundThrottling: true,
-      },
-    });
-    overlay.setContentProtection(true);
-    overlay.setIgnoreMouseEvents(true, { forward: true });
-    overlay.setAlwaysOnTop(true, "screen-saver", 1);
-    overlay.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true });
-    overlay.loadFile(htmlPath, { query: { img: imageUrl } });
-    overlay.once("ready-to-show", () => {
-      overlay.setBounds({ x, y, width, height });
-      overlay.setContentProtection(true);
-      overlay.setAlwaysOnTop(true, "screen-saver", 1);
-      excludeWindowFromCapture(overlay);
-      overlay.showInactive();
-      overlay.moveTop();
-    });
-    overlay.on("closed", () => {
-      privacyOverlays = privacyOverlays.filter((item) => item !== overlay);
-    });
-    return overlay;
   });
 }
 
@@ -652,8 +514,6 @@ app.on("before-quit", async (e) => {
   if (backend.isRunning()) {
     e.preventDefault();
     isQuitting = true;
-    stopPrivacyPolling();
-    await setPrivacyOverlay(false);
     await backend.stop();
     app.exit(0);
   }

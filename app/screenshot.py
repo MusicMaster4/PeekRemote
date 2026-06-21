@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import platform
 from dataclasses import dataclass
 from datetime import datetime
 from io import BytesIO
@@ -76,7 +77,42 @@ def monitor_for_id(monitor_id: int | None = None) -> Monitor:
     return monitors[0]
 
 
+def _privacy_capture_enabled() -> bool:
+    if platform.system() != "Windows":
+        return False
+    try:
+        from . import privacy
+
+        return bool(privacy.state().enabled)
+    except Exception:
+        return False
+
+
+def _grab_imagegrab_monitor(monitor_id: int | None = None) -> tuple[Image.Image, Monitor]:
+    monitor = monitor_for_id(monitor_id)
+    bbox = (
+        monitor.left,
+        monitor.top,
+        monitor.left + monitor.width,
+        monitor.top + monitor.height,
+    )
+    image = ImageGrab.grab(
+        bbox=bbox,
+        include_layered_windows=False,
+        all_screens=True,
+    )
+    if image.mode != "RGB":
+        image = image.convert("RGB")
+    return image, monitor
+
+
 def _grab_image(monitor_id: int | None = None) -> tuple[Image.Image, Monitor]:
+    if _privacy_capture_enabled():
+        try:
+            return _grab_imagegrab_monitor(monitor_id)
+        except Exception:
+            pass
+
     if _MSS_OK:
         with mss.mss() as sct:
             index = monitor_id if monitor_id and 0 < monitor_id < len(sct.monitors) else 1
