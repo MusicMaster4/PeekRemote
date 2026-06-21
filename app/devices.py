@@ -13,6 +13,15 @@ from .config import settings
 _LOCK = threading.RLock()
 _CACHE: dict[str, dict[str, Any]] | None = None
 
+# One-time reset marker. The stored file carries the reset version it was last
+# written with; when this constant is higher, the device list is wiped exactly
+# once on first load after the update (and the file is rewritten with the new
+# marker, so it never resets again). Bump this whenever a release should start
+# from a clean device list — e.g. to clear the duplicates created before the
+# dedup fix. Do NOT bump it on routine releases, or users lose their device
+# names every update.
+_RESET_VERSION = 1
+
 
 def _data_dir() -> Path:
     path = settings.app_data_dir
@@ -31,14 +40,22 @@ def _load() -> dict[str, dict[str, Any]]:
     with _LOCK:
         if _CACHE is not None:
             return _CACHE
+        stored_reset = _RESET_VERSION
         try:
             raw = json.loads(_path().read_text(encoding="utf-8"))
             devices = raw.get("devices", {}) if isinstance(raw, dict) else {}
+            stored_reset = int(raw.get("reset_version", 0)) if isinstance(raw, dict) else 0
             _CACHE = {
                 str(k): v for k, v in devices.items() if isinstance(v, dict) and str(k)
             }
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+            # Missing/corrupt file: nothing to reset, start clean at the current
+            # marker so the one-time wipe doesn't fire on a fresh install.
             _CACHE = {}
+        if stored_reset < _RESET_VERSION:
+            # First load after a release that requested a clean slate.
+            _CACHE = {}
+            _save()
         return _CACHE
 
 
@@ -47,7 +64,11 @@ def _save() -> None:
         path = _path()
         tmp = path.with_suffix(".tmp")
         tmp.write_text(
-            json.dumps({"devices": _CACHE or {}}, ensure_ascii=True, indent=2),
+            json.dumps(
+                {"devices": _CACHE or {}, "reset_version": _RESET_VERSION},
+                ensure_ascii=True,
+                indent=2,
+            ),
             encoding="utf-8",
         )
         tmp.replace(path)
