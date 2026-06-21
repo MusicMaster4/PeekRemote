@@ -239,7 +239,9 @@ export default function LiveUse({
 
   // Controls
   const [tab, setTab] = useState("mouse"); // mouse | keyboard | special
-  const [dockHidden, setDockHidden] = useState(false);
+  // Start with the dock minimized so opening the link shows the full screen
+  // first; the user taps the "Controls" pill to reveal the controls.
+  const [dockHidden, setDockHidden] = useState(true);
   const [mouseAction, setMouseAction] = useState("click"); // click | drag
   const [button, setButton] = useState("left");
   const [doubleClick, setDoubleClick] = useState(false);
