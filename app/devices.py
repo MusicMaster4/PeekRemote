@@ -92,6 +92,45 @@ def _android_model(user_agent: str) -> str:
     return model[:48]
 
 
+def find_device_id_by_fingerprint(user_agent: str, client_ip: str) -> str | None:
+    """Encontra um aparelho já conhecido pelo par (IP + user-agent).
+
+    Usado como rede de segurança quando o cookie de aparelho não chega (ex.: o
+    primeiro acesso vindo de um QR code não envia cookies `SameSite`). Dentro do
+    Tailscale cada aparelho tem um IP estável e único, então IP + user-agent é uma
+    impressão digital confiável para reconhecer "o mesmo aparelho reconectando" e
+    evitar criar uma entrada duplicada a cada conexão.
+    """
+    ip = (client_ip or "").strip()
+    ua = (user_agent or "")[:500]
+    if not ip or not ua:
+        return None
+    best_id: str | None = None
+    best_seen = -1.0
+    with _LOCK:
+        for device_id, device in _load().items():
+            if device.get("last_ip") != ip:
+                continue
+            if device.get("user_agent") != ua:
+                continue
+            seen = float(device.get("last_seen") or 0)
+            if seen > best_seen:
+                best_seen = seen
+                best_id = device_id
+    return best_id
+
+
+def delete_device(device_id: str) -> bool:
+    """Remove um aparelho da lista. Não bane nem bloqueia — só apaga o registro."""
+    with _LOCK:
+        devices = _load()
+        if device_id not in devices:
+            return False
+        del devices[device_id]
+        _save()
+        return True
+
+
 def touch_device(device_id: str, user_agent: str, client_ip: str) -> dict[str, Any]:
     now = time.time()
     info = default_device_info(user_agent)

@@ -372,6 +372,11 @@ function renderDevices(devices) {
       if (event.key === "Enter") saveDeviceName(input.dataset.deviceId);
     });
   });
+  $$(".device-remove").forEach((button) => {
+    button.addEventListener("click", () =>
+      removeDevice(button.dataset.deviceId, button.dataset.deviceName)
+    );
+  });
 }
 
 function deviceRowHtml(device) {
@@ -396,7 +401,12 @@ function deviceRowHtml(device) {
         </div>
         <div class="device-meta mono small">${escapeHtml(meta || device.user_agent || "")}</div>
       </div>
-      <button class="btn btn-ghost btn-sm device-save" data-device-id="${escapeHtml(device.id)}">Save</button>
+      <div class="device-actions">
+        <button class="btn btn-ghost btn-sm device-save" data-device-id="${escapeHtml(device.id)}">Save</button>
+        <button class="btn btn-ghost btn-sm device-remove" data-device-id="${escapeHtml(
+          device.id
+        )}" data-device-name="${escapeHtml(name)}"${active ? " disabled title=\"This device is connected right now\"" : ""}>Remove</button>
+      </div>
     </div>
   `;
 }
@@ -429,6 +439,33 @@ async function saveDeviceName(deviceId) {
   }
   button.textContent = "Saved";
   setTimeout(() => (button.textContent = "Save"), 1200);
+}
+
+async function removeDevice(deviceId, deviceName) {
+  if (!deviceId) return;
+  const label = deviceName ? `"${deviceName}"` : "this device";
+  if (!window.confirm(`Remove ${label} from the list? It can pair again at any time.`)) {
+    return;
+  }
+  const row = $(`[data-device-row="${cssEscape(deviceId)}"]`);
+  const button = $(`.device-remove[data-device-id="${cssEscape(deviceId)}"]`);
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Removing";
+  }
+  const res = await window.peek.deleteDevice({ id: deviceId });
+  if (!res.ok) {
+    if (button) {
+      button.disabled = false;
+      button.textContent = "Remove";
+    }
+    window.alert(res.message || "Could not remove device.");
+    return;
+  }
+  if (row) row.remove();
+  if (!$$(".device-row").length) {
+    $("#devices-list").innerHTML = `<div class="status-card mono small muted">No paired devices yet. Pair a phone with the QR code first.</div>`;
+  }
 }
 
 async function loadConnect() {

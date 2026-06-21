@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("peek", {
   backendLogs: () => ipcRenderer.invoke("backend:logs"),
   listDevices: () => ipcRenderer.invoke("devices:list"),
   renameDevice: (payload) => ipcRenderer.invoke("devices:rename", payload),
+  deleteDevice: (payload) => ipcRenderer.invoke("devices:delete", payload),
 
   // Onboarding + settings
   completeOnboarding: (payload) => ipcRenderer.invoke("onboarding:complete", payload),

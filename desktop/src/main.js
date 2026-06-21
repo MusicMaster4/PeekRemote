@@ -591,6 +591,21 @@ function registerIpc() {
     return { ok: true, device: res.data.device };
   });
 
+  ipcMain.handle("devices:delete", async (_e, { id }) => {
+    const safeId = encodeURIComponent(String(id || ""));
+    const res = await backendRequest(`/api/devices/${safeId}`, { method: "DELETE" });
+    if (!res.ok) {
+      return {
+        ok: false,
+        message:
+          (res.data && (res.data.detail || res.data.message)) ||
+          res.reason ||
+          "Could not remove device.",
+      };
+    }
+    return { ok: true };
+  });
+
   ipcMain.handle("update:check", () => updater.check());
   ipcMain.handle("update:download", () => updater.download());
   ipcMain.handle("update:install", async () => {

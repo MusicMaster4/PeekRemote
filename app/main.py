@@ -268,21 +268,26 @@ def _create_session(request: Request) -> str:
     token = secrets.token_urlsafe(32)
     now = time.time()
     is_owner = not any(s.is_owner for s in active_sessions.values())
+    user_agent = request.headers.get("user-agent", "") or ""
+    client_ip = _client_key(request)
     device_id = request.cookies.get(DEVICE_COOKIE_NAME) or ""
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", device_id):
-        device_id = secrets.token_urlsafe(12)
-    devices.touch_device(
-        device_id,
-        request.headers.get("user-agent", "") or "",
-        _client_key(request),
-    )
+        # Sem cookie válido (ex.: primeiro acesso via QR não envia cookies
+        # SameSite): tenta reconhecer o aparelho pela impressão IP + user-agent
+        # antes de criar um id novo, senão o mesmo celular vira um aparelho
+        # diferente a cada conexão.
+        device_id = (
+            devices.find_device_id_by_fingerprint(user_agent, client_ip)
+            or secrets.token_urlsafe(12)
+        )
+    devices.touch_device(device_id, user_agent, client_ip)
     active_sessions[token] = SessionInfo(
         token=token,
         pub_id=secrets.token_urlsafe(6),
         created_at=now,
         last_seen=now,
-        client_ip=_client_key(request),
-        user_agent=(request.headers.get("user-agent", "") or "")[:200],
+        client_ip=client_ip,
+        user_agent=user_agent[:200],
         is_owner=is_owner,
         device_id=device_id,
     )
@@ -373,7 +378,10 @@ def _set_auth_cookie(response: Response, request: Request, token: str) -> None:
             max_age=DEVICE_COOKIE_SECONDS,
             httponly=True,
             secure=secure,
-            samesite="strict",
+            # "lax" (não "strict") para que o cookie volte numa navegação de topo
+            # vinda de fora do site — é o caso do QR code. Com "strict" o cookie
+            # não era enviado no /api/qr-login e cada acesso virava um aparelho novo.
+            samesite="lax",
         )
 
 
@@ -687,6 +695,19 @@ async def rename_paired_device(
     device["active_sessions"] = _active_device_counts().get(device_id, 0)
     _audit("DEVICE_RENAMED", request, device=device_id)
     return JSONResponse({"device": device})
+
+
+@app.delete("/api/devices/{device_id}")
+async def delete_paired_device(
+    device_id: str,
+    request: Request,
+    _: SessionInfo | None = Depends(require_desktop_or_owner),
+) -> JSONResponse:
+    """Remove um aparelho da lista (apenas apaga o registro; não bane nem bloqueia)."""
+    if not devices.delete_device(device_id):
+        raise HTTPException(status_code=404, detail="Device not found.")
+    _audit("DEVICE_REMOVED", request, device=device_id)
+    return JSONResponse({"removed": device_id})
 
 
 @app.get("/api/monitors")
