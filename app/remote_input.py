@@ -413,18 +413,13 @@ if _IS_WINDOWS:
     _MOUSEEVENTF_RIGHTUP = 0x0010
     _MOUSEEVENTF_MIDDLEDOWN = 0x0020
     _MOUSEEVENTF_MIDDLEUP = 0x0040
-    _MOUSEEVENTF_MOVE = 0x0001
     _MOUSEEVENTF_WHEEL = 0x0800
-    _MOUSEEVENTF_ABSOLUTE = 0x8000
-    _MOUSEEVENTF_VIRTUALDESK = 0x4000
     _WHEEL_DELTA = 120
     _INPUT_MOUSE = 0
     _INPUT_KEYBOARD = 1
     _MAPVK_VK_TO_VSC = 0
 
     _PUL = ctypes.POINTER(ctypes.c_ulong)
-    _WIN_INPUT_EXTRA = ctypes.c_ulong(0x51504B52)
-    _WIN_INPUT_EXTRA_PTR = ctypes.pointer(_WIN_INPUT_EXTRA)
 
     class _KEYBDINPUT(ctypes.Structure):
         _fields_ = [
@@ -454,6 +449,8 @@ if _IS_WINDOWS:
     _user32 = ctypes.windll.user32
     _user32.SendInput.argtypes = (wintypes.UINT, ctypes.POINTER(_INPUT), ctypes.c_int)
     _user32.SendInput.restype = wintypes.UINT
+    _user32.SetCursorPos.argtypes = (ctypes.c_int, ctypes.c_int)
+    _user32.SetCursorPos.restype = wintypes.BOOL
     _user32.MapVirtualKeyW.argtypes = (wintypes.UINT, wintypes.UINT)
     _user32.MapVirtualKeyW.restype = wintypes.UINT
     _user32.VkKeyScanW.argtypes = (wintypes.WCHAR,)
@@ -569,25 +566,22 @@ if _IS_WINDOWS:
             flags |= _KEYEVENTF_KEYUP
         inp = _INPUT()
         inp.type = _INPUT_KEYBOARD
-        inp.union.ki = _KEYBDINPUT(0, scan, flags, 0, _WIN_INPUT_EXTRA_PTR)
+        inp.union.ki = _KEYBDINPUT(0, scan, flags, 0, None)
         _send_input(inp)
 
-    def _win_mouse_event(flags: int, mouse_data: int = 0, dx: int = 0, dy: int = 0) -> None:
+    def _win_mouse_event(flags: int, mouse_data: int = 0) -> None:
         inp = _INPUT()
         inp.type = _INPUT_MOUSE
-        inp.union.mi = _MOUSEINPUT(dx, dy, mouse_data, flags, 0, _WIN_INPUT_EXTRA_PTR)
+        inp.union.mi = _MOUSEINPUT(0, 0, mouse_data, flags, 0, None)
         _send_input(inp)
 
     def _win_move_mouse(x: int, y: int) -> None:
-        left, top, width, height = screen_bounds()
         cx, cy = _clamp_xy(x, y)
-        abs_x = round((cx - left) * 65535 / max(1, width - 1))
-        abs_y = round((cy - top) * 65535 / max(1, height - 1))
-        _win_mouse_event(
-            _MOUSEEVENTF_MOVE | _MOUSEEVENTF_ABSOLUTE | _MOUSEEVENTF_VIRTUALDESK,
-            dx=abs_x,
-            dy=abs_y,
-        )
+        if not _user32.SetCursorPos(cx, cy):
+            code = ctypes.GetLastError()
+            raise InputUnavailable(
+                f"Windows recusou mover o cursor para o ponto solicitado (erro {code})."
+            )
 
     def _win_click(x: int, y: int, button: str = "left", double: bool = False) -> None:
         down, up = _WIN_MOUSE_BUTTON_FLAGS.get(button, _WIN_MOUSE_BUTTON_FLAGS["left"])
@@ -668,7 +662,7 @@ if _IS_WINDOWS:
             flags |= _KEYEVENTF_KEYUP
         inp = _INPUT()
         inp.type = _INPUT_KEYBOARD
-        inp.union.ki = _KEYBDINPUT(0, code_unit, flags, 0, _WIN_INPUT_EXTRA_PTR)
+        inp.union.ki = _KEYBDINPUT(0, code_unit, flags, 0, None)
         _send_input(inp)
 
     def _win_type_text(text: str) -> None:

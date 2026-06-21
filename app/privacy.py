@@ -190,6 +190,13 @@ if platform.system() == "Windows":
     _user32.SetWindowPos.restype = wintypes.BOOL
     _user32.SetWindowDisplayAffinity.argtypes = (wintypes.HWND, wintypes.DWORD)
     _user32.SetWindowDisplayAffinity.restype = wintypes.BOOL
+    _user32.SetLayeredWindowAttributes.argtypes = (
+        wintypes.HWND,
+        wintypes.COLORREF,
+        wintypes.BYTE,
+        wintypes.DWORD,
+    )
+    _user32.SetLayeredWindowAttributes.restype = wintypes.BOOL
     _user32.BeginPaint.argtypes = (wintypes.HWND, ctypes.POINTER(_PAINTSTRUCT))
     _user32.BeginPaint.restype = wintypes.HDC
     _user32.EndPaint.argtypes = (wintypes.HWND, ctypes.POINTER(_PAINTSTRUCT))
@@ -284,6 +291,7 @@ if platform.system() == "Windows":
     _WS_VISIBLE = 0x10000000
     _WS_EX_TOPMOST = 0x00000008
     _WS_EX_TRANSPARENT = 0x00000020
+    _WS_EX_LAYERED = 0x00080000
     _WS_EX_TOOLWINDOW = 0x00000080
     _WS_EX_NOACTIVATE = 0x08000000
     _SW_SHOWNOACTIVATE = 4
@@ -298,6 +306,7 @@ if platform.system() == "Windows":
     _DT_SINGLELINE = 0x00000020
     _WDA_MONITOR = 0x00000001
     _WDA_EXCLUDEFROMCAPTURE = 0x00000011
+    _LWA_ALPHA = 0x00000002
 
 
 class _WindowsInputBlocker:
@@ -523,7 +532,13 @@ class _WindowsPrivacyOverlay:
             _user32.EndPaint(hwnd, ctypes.byref(ps))
 
     def _create_window(self, instance, x: int, y: int, width: int, height: int) -> int:
-        ex_style = _WS_EX_TOPMOST | _WS_EX_TOOLWINDOW | _WS_EX_NOACTIVATE | _WS_EX_TRANSPARENT
+        ex_style = (
+            _WS_EX_TOPMOST
+            | _WS_EX_TOOLWINDOW
+            | _WS_EX_NOACTIVATE
+            | _WS_EX_TRANSPARENT
+            | _WS_EX_LAYERED
+        )
         hwnd = _user32.CreateWindowExW(
             ex_style,
             self._class_name,
@@ -540,6 +555,11 @@ class _WindowsPrivacyOverlay:
         )
         if not hwnd:
             return 0
+        # A layered window stays invisible until its alpha is defined. Make it
+        # fully opaque so the WM_PAINT content shows on the physical monitor,
+        # while WS_EX_LAYERED | WS_EX_TRANSPARENT lets every click (including the
+        # injected remote ones) pass straight through to the real app below.
+        _user32.SetLayeredWindowAttributes(hwnd, 0, 255, _LWA_ALPHA)
         if not _user32.SetWindowDisplayAffinity(hwnd, _WDA_EXCLUDEFROMCAPTURE):
             _user32.SetWindowDisplayAffinity(hwnd, _WDA_MONITOR)
             self._message = "Capture exclusion fallback is active."
