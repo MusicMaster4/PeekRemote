@@ -1258,14 +1258,14 @@ export default function LiveUse({
         <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)+5.6rem)] z-30 flex justify-center px-3">
           <button
             onClick={copyPcClip}
-            className={`pointer-events-auto flex max-w-[min(92vw,420px)] items-center gap-2.5 rounded-full border bg-panel-solid px-4 py-2.5 text-left shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors ${
+            className={`pointer-events-auto flex max-w-[min(92vw,420px)] items-center gap-2.5 rounded-[2px] border bg-panel-solid px-4 py-2.5 text-left shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors ${
               pcClip.copied
                 ? "border-ink/40 text-ink"
                 : "border-line-strong text-silver hover:text-ink active:scale-[0.98]"
             }`}
             aria-label={pcClip.copied ? "Copied from PC" : "Copy text from PC to phone"}
           >
-            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-black/40">
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[2px] border border-line bg-black/40">
               {pcClip.copied ? <IconCheck className="h-4 w-4" /> : <IconClipboard className="h-4 w-4" />}
             </span>
             <span className="flex min-w-0 flex-col font-mono">
