@@ -25,6 +25,8 @@ import {
   IconUsers,
   IconLock,
   IconMonitor,
+  IconClipboard,
+  IconCheck,
 } from "@/components/icons";
 
 const MIN = 1;
@@ -199,6 +201,41 @@ const splitComboKeys = (value) => {
   return parts.map(normalizeKeyName).filter(Boolean);
 };
 
+// Copy text to the device clipboard, returning true on success. Tries the async
+// Clipboard API first (works on desktop and on Android Chrome while the page is
+// focused), then falls back to a hidden <textarea> + execCommand("copy") for
+// contexts that reject the async API (notably iOS Safari outside a user
+// gesture). Both paths can still be blocked when there's no user gesture — the
+// caller surfaces a tap-to-copy banner when this returns false.
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the legacy path */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Live mode — remote control of the PC from the phone.
  *
@@ -254,6 +291,9 @@ export default function LiveUse({
   const monitorIdRef = useRef(initialShot?.monitorId || 1);
   const [status, setStatus] = useState({ text: "Ready.", state: "idle" });
   const [showHint, setShowHint] = useState(true);
+  // Latest text copied on the PC that we're relaying to the phone clipboard.
+  // `copied` is true once it's actually on the phone (auto or after a tap).
+  const [pcClip, setPcClip] = useState(null);
 
   // Controls
   const [tab, setTab] = useState("mouse"); // mouse | keyboard | special
@@ -707,15 +747,24 @@ export default function LiveUse({
         if (!data.enabled) {
           lastHash = "";
           primed = false;
+          setPcClip(null);
           return;
         }
         if (data.hash && data.hash !== lastHash && data.text) {
           const shouldOffer = primed;
           lastHash = data.hash;
           primed = true;
-          if (shouldOffer && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(data.text);
-          }
+          // Skip whatever was already on the PC clipboard when we opened.
+          if (!shouldOffer) return;
+          // Try a silent copy — works on desktop and Android Chrome while the
+          // tab is focused. iOS Safari (and any backgrounded tab) blocks
+          // clipboard writes that aren't tied to a tap, so when this fails we
+          // surface a tap-to-copy banner instead of failing silently (the old
+          // behavior — calling writeText from this background poll just threw,
+          // which is why PC→phone copy "did nothing").
+          const auto = document.hasFocus?.() ? await copyTextToClipboard(data.text) : false;
+          if (!active) return;
+          setPcClip({ text: data.text, copied: auto });
         }
       } catch (err) {
         if (err.unauthorized) onLogout();
@@ -728,6 +777,26 @@ export default function LiveUse({
       clearInterval(timer);
     };
   }, [onLogout]);
+
+  // Finish (or retry) the copy on tap — a user gesture always satisfies the
+  // browser's clipboard-write requirement.
+  const copyPcClip = async () => {
+    if (!pcClip) return;
+    const ok = await copyTextToClipboard(pcClip.text);
+    setPcClip((prev) => (prev ? { ...prev, copied: ok } : prev));
+    setStatus(
+      ok
+        ? { text: "Copied from PC to phone.", state: "idle" }
+        : { text: "Couldn't copy — try again.", state: "error" },
+    );
+  };
+
+  // Auto-dismiss the clipboard banner once the text is on the phone.
+  useEffect(() => {
+    if (!pcClip?.copied) return;
+    const t = setTimeout(() => setPcClip(null), 2600);
+    return () => clearTimeout(t);
+  }, [pcClip]);
 
   // ---- Gestures (touch + mouse for desktop testing) ----------------------
   useEffect(() => {
@@ -839,6 +908,51 @@ export default function LiveUse({
       cont.removeEventListener("gesturestart", preventGesture);
       cont.removeEventListener("gesturechange", preventGesture);
       window.removeEventListener("resize", onResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reconnect the stream after the phone returns from the background. Mobile
+  // browsers freeze or drop the MJPEG connection while the tab is hidden (the
+  // user switches apps), and the <img> keeps a dead socket — showing a black
+  // frame with no error event — until streaming is toggled off/on by hand.
+  // Re-issuing the stream URL with a fresh nonce forces a clean reconnect; when
+  // not streaming we just pull one fresh frame so a stale shot isn't left up.
+  useEffect(() => {
+    let wasHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    const resume = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (!wasHidden) return;
+      wasHidden = false;
+      if (autoRef.current) {
+        setStreamUrl(
+          screenshotStreamUrl({
+            profile: "live",
+            monitor: monitorIdRef.current,
+            fps: STREAM_FPS,
+            nonce: Date.now(),
+          }),
+        );
+        setStatus({ text: `Streaming at ${STREAM_FPS} fps.`, state: "idle" });
+      } else {
+        doRefresh();
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") wasHidden = true;
+      else resume();
+    };
+    const onPageShow = (e) => {
+      if (e.persisted) {
+        wasHidden = true;
+        resume();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1048,11 +1162,39 @@ export default function LiveUse({
       </div>
 
       {/* First-run gesture hint — fades out, never overlaps controls for long. */}
-      {showHint && !dockHidden && (
+      {showHint && !dockHidden && !pcClip && (
         <div
           className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top)+5.2rem)] z-10 -translate-x-1/2 animate-fadein whitespace-nowrap rounded-full border border-line bg-black/70 px-3 py-1.5 font-mono text-[0.58rem] uppercase tracking-stamp text-silver"
         >
           1 finger: move aim · 2 fingers: zoom
+        </div>
+      )}
+
+      {/* Clipboard relay — text just copied on the PC. We try to push it to the
+          phone clipboard automatically; when the browser blocks that (common on
+          mobile, where writes need a tap), this banner finishes the copy with a
+          single touch. */}
+      {pcClip && (
+        <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)+5.6rem)] z-30 flex justify-center px-3">
+          <button
+            onClick={copyPcClip}
+            className={`pointer-events-auto flex max-w-[min(92vw,420px)] items-center gap-2.5 rounded-full border bg-panel-solid px-4 py-2.5 text-left shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors ${
+              pcClip.copied
+                ? "border-ink/40 text-ink"
+                : "border-line-strong text-silver hover:text-ink active:scale-[0.98]"
+            }`}
+            aria-label={pcClip.copied ? "Copied from PC" : "Copy text from PC to phone"}
+          >
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-full border border-line bg-black/40">
+              {pcClip.copied ? <IconCheck className="h-4 w-4" /> : <IconClipboard className="h-4 w-4" />}
+            </span>
+            <span className="flex min-w-0 flex-col font-mono">
+              <span className="text-[0.56rem] uppercase tracking-stamp text-faint">
+                {pcClip.copied ? "Copied from PC" : "From PC · tap to copy"}
+              </span>
+              <span className="truncate text-[0.78rem] text-silver">{pcClip.text}</span>
+            </span>
+          </button>
         </div>
       )}
 
