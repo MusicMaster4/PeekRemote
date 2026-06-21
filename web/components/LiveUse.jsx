@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   captureScreenshot,
   getClipboard,
+  readClipboardNow,
   getPrivacyState,
   listMonitors,
   revokeScreenshot,
@@ -294,6 +295,9 @@ export default function LiveUse({
   // Latest text copied on the PC that we're relaying to the phone clipboard.
   // `copied` is true once it's actually on the phone (auto or after a tap).
   const [pcClip, setPcClip] = useState(null);
+  // Clipboard hash already pushed to the phone via the Copy button, so the
+  // background poll doesn't re-announce the same text with a banner.
+  const handledHashRef = useRef("");
 
   // Controls
   const [tab, setTab] = useState("mouse"); // mouse | keyboard | special
@@ -633,7 +637,81 @@ export default function LiveUse({
     send({ action: "scroll", x: xy.x, y: xy.y, dy }, "Scroll sent.");
   };
 
-  const sendPreset = (preset) => send({ action: "hotkey", keys: preset.keys }, preset.label);
+  // The "Copy" preset is special: tapping it is a user gesture, so we can put
+  // the text the PC just copied straight onto the phone's clipboard. We send
+  // Ctrl/Cmd+C, read the PC clipboard on demand, and write it here. On iOS
+  // Safari a plain awaited writeText would be rejected (the gesture is "spent"
+  // after the await), so we use the deferred ClipboardItem pattern: the write is
+  // started synchronously inside the tap and fed by a Promise that resolves once
+  // the text arrives — which keeps it gesture-driven.
+  const isCopyPreset = (preset) =>
+    preset.keys.length === 2 &&
+    preset.keys[1] === "c" &&
+    (preset.keys[0] === "ctrl" || preset.keys[0] === "cmd");
+
+  const grabPcCopy = async (preset) => {
+    await sendInput({ action: "hotkey", keys: preset.keys, monitor_id: monitorIdRef.current });
+    // Give the PC a moment to populate its clipboard before reading it back.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const data = await readClipboardNow();
+    const text = data?.enabled ? data.text || "" : "";
+    // Remember the hash so the background poll won't re-announce it as a banner.
+    if (data?.hash) handledHashRef.current = data.hash;
+    return text;
+  };
+
+  const afterCopy = (text, onPhone) => {
+    if (!mountedRef.current) return;
+    if (text) setPcClip({ text, copied: onPhone });
+    setStatus({
+      text: onPhone
+        ? "Copied — also on your phone."
+        : text
+          ? "Copied on PC. Tap the banner to copy here."
+          : "Copied on PC.",
+      state: "idle",
+    });
+    // Reflect any on-screen change (selection highlight, etc.).
+    if (!autoRef.current) doRefresh();
+  };
+
+  const copyFromPc = (preset) => {
+    setStatus({ text: "Copying…", state: "busy" });
+    // Preferred path — keep the async write inside the gesture via a deferred
+    // blob (works on iOS Safari and modern Chrome).
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      try {
+        let copied = "";
+        const blob = grabPcCopy(preset).then((text) => {
+          copied = text;
+          if (!text) throw new Error("empty");
+          return new Blob([text], { type: "text/plain" });
+        });
+        navigator.clipboard
+          .write([new ClipboardItem({ "text/plain": blob })])
+          .then(() => afterCopy(copied, true))
+          .catch(() => afterCopy(copied, false));
+        return;
+      } catch {
+        /* fall through to the plain path below */
+      }
+    }
+    // Fallback — plain async copy (desktop, older Android Chrome).
+    grabPcCopy(preset)
+      .then(async (text) => {
+        const onPhone = text ? await copyTextToClipboard(text) : false;
+        afterCopy(text, onPhone);
+      })
+      .catch((err) => {
+        if (err?.unauthorized) return onLogout();
+        if (mountedRef.current) setStatus({ text: "Copy failed.", state: "error" });
+      });
+  };
+
+  const sendPreset = (preset) =>
+    isCopyPreset(preset)
+      ? copyFromPc(preset)
+      : send({ action: "hotkey", keys: preset.keys }, preset.label);
 
   const sendCombo = () => {
     const typedKeys = splitComboKeys(comboKey);
@@ -756,6 +834,8 @@ export default function LiveUse({
           primed = true;
           // Skip whatever was already on the PC clipboard when we opened.
           if (!shouldOffer) return;
+          // Skip text we just pushed to the phone via the Copy button.
+          if (data.hash === handledHashRef.current) return;
           // Try a silent copy — works on desktop and Android Chrome while the
           // tab is focused. iOS Safari (and any backgrounded tab) blocks
           // clipboard writes that aren't tied to a tap, so when this fails we

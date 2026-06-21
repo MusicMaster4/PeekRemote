@@ -73,6 +73,35 @@ def latest() -> dict:
         }
 
 
+def read_now() -> dict:
+    """Lê o clipboard do SO imediatamente (sob demanda).
+
+    Usado logo apos um Copy remoto, para o celular pegar o texto recem-copiado
+    sem esperar o tick (~1s) do monitor. Tambem atualiza o estado monitorado para
+    o poller de fundo nao re-anunciar o mesmo valor logo em seguida.
+    """
+    with _LOCK:
+        enabled = _SYNC_ENABLED
+    if not enabled:
+        return {"enabled": False, "has_text": False, "text": "", "hash": "", "updated_at": 0}
+    text = (_read_text() or "")[:MAX_TEXT]
+    digest = (
+        hashlib.sha256(text.encode("utf-8", errors="ignore")).hexdigest() if text else ""
+    )
+    if text:
+        with _LOCK:
+            _STATE.text = text
+            _STATE.hash = digest
+            _STATE.updated_at = time.time()
+    return {
+        "enabled": True,
+        "has_text": bool(text),
+        "text": text,
+        "hash": digest,
+        "updated_at": _STATE.updated_at,
+    }
+
+
 def _monitor_loop() -> None:
     last_hash = ""
     while not _STOP.wait(1.0):

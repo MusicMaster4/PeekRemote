@@ -103,6 +103,15 @@ export async function getClipboard() {
   return res.json();
 }
 
+// On-demand read of the PC clipboard — used right after a remote Copy so the
+// phone gets the fresh text without waiting for the background monitor.
+export async function readClipboardNow() {
+  const res = await req("/api/clipboard/read", { method: "POST" });
+  if (res.status === 401) throw unauthorized();
+  if (!res.ok) throw new Error(await detail(res, "Couldn't read the computer clipboard."));
+  return res.json();
+}
+
 export async function getPrivacyState() {
   const res = await req("/api/privacy");
   if (res.status === 401) throw unauthorized();

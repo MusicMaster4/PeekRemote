@@ -714,6 +714,13 @@ async def latest_clipboard(_: str = Depends(require_auth)) -> JSONResponse:
     return JSONResponse(clipboard.latest())
 
 
+@app.post("/api/clipboard/read")
+async def read_clipboard_now(_: str = Depends(require_auth)) -> JSONResponse:
+    """Le o clipboard do PC na hora (acionado pelo botao Copy do celular), para o
+    texto recem-copiado ir ao clipboard do celular sem esperar o monitor."""
+    return JSONResponse(await run_in_threadpool(clipboard.read_now))
+
+
 @app.get("/api/clipboard-sync")
 async def get_clipboard_sync(
     request: Request, _: SessionInfo | None = Depends(require_desktop_or_owner)
