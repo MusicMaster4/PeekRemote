@@ -42,7 +42,7 @@ class Backend extends EventEmitter {
     if (this.isRunning() || this.starting) return this.port;
     this.starting = true;
     try {
-      this.port = await pickPort(port || 8000);
+      this.port = await pickPort(port || 1739);
       const { command, args, cwd, mode } = resolveBackend();
 
       const env = {

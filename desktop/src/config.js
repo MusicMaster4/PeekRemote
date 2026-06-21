@@ -14,16 +14,25 @@ const DEFAULTS = {
   onboardingComplete: false,
   autoStart: false,
   autoCheckUpdates: true,
-  serverPort: 8000,
+  serverPort: 1739,
 };
 
 let cache = null;
+
+// Port 8000 was the old default. It's heavily contended (dev servers grab it),
+// and since the app auto-starts at boot it would squat on 8000 before the user
+// could use it. The port is never user-configurable, so any persisted 8000 is
+// just the stale default — migrate it forward to the current default.
+const LEGACY_DEFAULT_PORT = 8000;
 
 function load() {
   if (cache) return cache;
   try {
     const raw = fs.readFileSync(CONFIG_PATH(), "utf-8");
     cache = { ...DEFAULTS, ...JSON.parse(raw) };
+    if (cache.serverPort === LEGACY_DEFAULT_PORT) {
+      cache.serverPort = DEFAULTS.serverPort;
+    }
   } catch {
     cache = { ...DEFAULTS };
   }

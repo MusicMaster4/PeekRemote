@@ -262,7 +262,7 @@ the environment or a `.env` file:
 | --- | --- | --- |
 | `APP_PIN` | required | 6-digit numeric PIN. The server refuses to start without it. |
 | `SERVER_HOST` | `127.0.0.1` | Local host. Never bind to `0.0.0.0`. |
-| `SERVER_PORT` | `8000` | Local port and Tailscale Serve target. |
+| `SERVER_PORT` | `1739` | Local port and Tailscale Serve target. |
 | `TAILSCALE_PATH` | empty | Path to the Tailscale CLI. Empty = autodetect. |
 | `QR_TTL_SECONDS` | `1800` | QR login token lifetime. |
 | `QR_OPEN_BROWSER` | `true` | Open the `/connect` page on start (the desktop app sets this to `false`). |

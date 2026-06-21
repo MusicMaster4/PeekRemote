@@ -37,7 +37,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SERVER_HOST"),
     )
     server_port: int = Field(
-        default=8000,
+        default=1739,
         ge=1,
         le=65535,
         validation_alias=AliasChoices("SERVER_PORT"),

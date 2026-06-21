@@ -1,7 +1,7 @@
 // FastAPI backend API client.
 // In production the frontend is served by FastAPI itself (same origin),
 // so BASE stays empty. To develop with `next dev`, set
-// NEXT_PUBLIC_API_BASE=http://127.0.0.1:8000 in the environment.
+// NEXT_PUBLIC_API_BASE=http://127.0.0.1:1739 in the environment.
 const BASE = process.env.NEXT_PUBLIC_API_BASE || "";
 
 function unauthorized() {
