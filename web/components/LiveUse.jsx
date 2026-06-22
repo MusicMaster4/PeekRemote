@@ -278,6 +278,12 @@ export default function LiveUse({
   const view = useRef({ scale: 1, tx: 0, ty: 0 });
   const crosshair = useRef({ fx: 0.5, fy: 0.5 });
   const dragStartRef = useRef(null);
+  // Mirror of `dockHidden` for the gesture handlers, which are attached once and
+  // must read the latest value live (see the gesture effect below). When the
+  // dock is hidden the surface reverts to the original capture gestures: one
+  // finger pans the image and a double-tap zooms where you tapped. With the dock
+  // open it stays in "live control" mode: one finger moves the aim, two zoom.
+  const dockHiddenRef = useRef(true);
 
   const [shot, setShot] = useState(initialShot || null);
   const shotRef = useRef(shot);
@@ -317,6 +323,10 @@ export default function LiveUse({
   const [showFkeys, setShowFkeys] = useState(false);
 
   const busyRef = useRef(false);
+  // AbortController of the in-flight capture, so a forced refresh (manual tap or
+  // returning from background) can break a stuck request instead of waiting out
+  // a dead socket.
+  const captureAbortRef = useRef(null);
   const autoRef = useRef(false);
   const mountedRef = useRef(true);
   const refreshTimer = useRef(null);
@@ -419,6 +429,7 @@ export default function LiveUse({
   }, [surfaceInsets.top, surfaceInsets.bottom, kbInset]);
 
   useEffect(() => {
+    dockHiddenRef.current = dockHidden;
     if (!dockHidden) requestAnimationFrame(placeCrosshair);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dockHidden]);
@@ -500,6 +511,17 @@ export default function LiveUse({
     setPct(Math.round(ns * 100));
   };
 
+  // Double-tap zoom level (capture mode): roughly 1:1 actual pixels, clamped to
+  // a sane band so a huge screenshot doesn't fly to MAX and a small one still
+  // zooms in usefully. Mirrors the original ZoomViewer behavior.
+  const doubleTapTarget = () => {
+    const el = imgRef.current;
+    if (el && el.naturalWidth && el.offsetWidth) {
+      return Math.min(3.5, Math.max(2, el.naturalWidth / el.offsetWidth));
+    }
+    return 2.6;
+  };
+
   // Relative joystick: the aim does NOT jump to the finger. A drag of N pixels
   // on screen moves the aim N pixels (1:1) from where it already is. Since the
   // aim is stored as a fraction of the image, we convert the screen delta to a
@@ -516,21 +538,45 @@ export default function LiveUse({
   };
 
   // ---- Screenshot refresh ------------------------------------------------
-  const doRefresh = async () => {
-    if (busyRef.current) return;
+  // Returns true once a fresh frame is shown. `force` aborts a stuck in-flight
+  // capture (e.g. a dead connection after the phone was backgrounded) so we can
+  // start a clean one instead of waiting out the long socket timeout.
+  const doRefresh = async (force = false) => {
+    if (busyRef.current) {
+      if (!force) return false;
+      captureAbortRef.current?.abort();
+    }
     busyRef.current = true;
     setBusy(true);
+    const controller = new AbortController();
+    captureAbortRef.current = controller;
     try {
-      const data = await captureScreenshot("live", monitorIdRef.current);
-      if (!mountedRef.current) return;
+      const data = await captureScreenshot("live", monitorIdRef.current, {
+        signal: controller.signal,
+      });
+      if (!mountedRef.current || controller.signal.aborted) return false;
       replaceShot(data);
+      setStatus({ text: "Ready.", state: "idle" });
+      return true;
     } catch (err) {
-      if (!mountedRef.current) return;
-      if (err.unauthorized) return onLogout();
-      setStatus({ text: err.message || "Failed to refresh.", state: "error" });
+      if (controller.signal.aborted || !mountedRef.current) return false;
+      if (err.unauthorized) {
+        onLogout();
+        return false;
+      }
+      setStatus({
+        text: err.timeout ? "Reconnecting…" : err.message || "Failed to refresh.",
+        state: "error",
+      });
+      return false;
     } finally {
-      busyRef.current = false;
-      if (mountedRef.current) setBusy(false);
+      // Only the latest capture owns the busy flag; a superseded one must not
+      // clear it out from under its replacement.
+      if (captureAbortRef.current === controller) {
+        captureAbortRef.current = null;
+        busyRef.current = false;
+        if (mountedRef.current) setBusy(false);
+      }
     }
   };
 
@@ -884,8 +930,17 @@ export default function LiveUse({
     if (!cont) return;
 
     let gesture = null;
+    let lastTap = 0;
+    let lastTapPos = null;
     const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
     const mid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
+
+    // One-finger gesture for the current mode: a pan (capture mode, dock hidden)
+    // or an aim nudge (live control, dock open).
+    const startOneFinger = (t, moved = false) =>
+      dockHiddenRef.current
+        ? { type: "pan", startX: t.clientX, startY: t.clientY, lastX: t.clientX, lastY: t.clientY, moved }
+        : { type: "aim", lastX: t.clientX, lastY: t.clientY };
 
     const onTouchStart = (e) => {
       if (e.touches.length === 2) {
@@ -893,9 +948,7 @@ export default function LiveUse({
         const [a, b] = e.touches;
         gesture = { type: "pinch", d: dist(a, b), m: mid(a, b), s0: view.current.scale };
       } else if (e.touches.length === 1) {
-        const t = e.touches[0];
-        // Aim as a joystick: store the last point and move by delta.
-        gesture = { type: "aim", lastX: t.clientX, lastY: t.clientY };
+        gesture = startOneFinger(e.touches[0]);
       }
     };
 
@@ -924,20 +977,61 @@ export default function LiveUse({
         nudgeAim(t.clientX - gesture.lastX, t.clientY - gesture.lastY);
         gesture.lastX = t.clientX;
         gesture.lastY = t.clientY;
+      } else if (gesture.type === "pan" && e.touches.length === 1) {
+        // Capture mode: one finger pans the zoomed image (1:1 with the finger).
+        const t = e.touches[0];
+        const dx = t.clientX - gesture.lastX;
+        const dy = t.clientY - gesture.lastY;
+        gesture.lastX = t.clientX;
+        gesture.lastY = t.clientY;
+        if (Math.abs(t.clientX - gesture.startX) + Math.abs(t.clientY - gesture.startY) > 10)
+          gesture.moved = true;
+        if (view.current.scale > 1) {
+          e.preventDefault();
+          view.current.tx += dx;
+          view.current.ty += dy;
+          clampPan();
+          apply();
+        }
       }
     };
 
     const onTouchEnd = (e) => {
+      const g = gesture;
+      // Capture mode: a tap that didn't pan is a (possible) double-tap to zoom.
+      if (g && g.type === "pan" && !g.moved) {
+        // preventDefault stops the browser from also synthesizing a click from
+        // this tap (which could otherwise re-trigger zoom).
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        const now = Date.now();
+        if (
+          now - lastTap < 300 &&
+          lastTapPos &&
+          Math.hypot(t.clientX - lastTapPos.x, t.clientY - lastTapPos.y) < 30
+        ) {
+          if (view.current.scale > 1.05) zoomTo(1, undefined, undefined, true);
+          else zoomTo(doubleTapTarget(), t.clientX, t.clientY, true);
+          lastTap = 0;
+          lastTapPos = null;
+        } else {
+          lastTap = now;
+          lastTapPos = { x: t.clientX, y: t.clientY };
+        }
+      }
+
       if (e.touches.length === 0) {
         gesture = null;
       } else if (e.touches.length === 1) {
-        // Back to one finger from a pinch: re-anchor without jumping the aim.
-        const t = e.touches[0];
-        gesture = { type: "aim", lastX: t.clientX, lastY: t.clientY };
+        // Back to one finger from a pinch: re-anchor for the current mode
+        // without jumping the aim (treat as already moved so it isn't a tap).
+        gesture = startOneFinger(e.touches[0], true);
       }
     };
 
-    // Mouse (desktop testing): drag = move aim (relative), wheel = zoom.
+    // Mouse (desktop testing): wheel = zoom always. Drag moves the aim with the
+    // dock open, or pans the zoomed image when it's hidden; double-click zooms
+    // at the cursor in that capture mode.
     let dragging = null;
     const onMouseDown = (e) => {
       if (e.button !== 0) return;
@@ -945,7 +1039,16 @@ export default function LiveUse({
     };
     const onMouseMove = (e) => {
       if (!dragging) return;
-      nudgeAim(e.clientX - dragging.x, e.clientY - dragging.y);
+      if (dockHiddenRef.current) {
+        if (view.current.scale > 1) {
+          view.current.tx += e.clientX - dragging.x;
+          view.current.ty += e.clientY - dragging.y;
+          clampPan();
+          apply();
+        }
+      } else {
+        nudgeAim(e.clientX - dragging.x, e.clientY - dragging.y);
+      }
       dragging.x = e.clientX;
       dragging.y = e.clientY;
     };
@@ -957,6 +1060,12 @@ export default function LiveUse({
       const factor = e.deltaY < 0 ? 1 / 1.18 : 1.18;
       zoomTo(view.current.scale * factor, e.clientX, e.clientY);
     };
+    const onDblClick = (e) => {
+      if (!dockHiddenRef.current) return;
+      e.preventDefault();
+      if (view.current.scale > 1.05) zoomTo(1, undefined, undefined, true);
+      else zoomTo(doubleTapTarget(), e.clientX, e.clientY, true);
+    };
     const preventGesture = (e) => e.preventDefault();
 
     cont.addEventListener("touchstart", onTouchStart, { passive: false });
@@ -967,6 +1076,7 @@ export default function LiveUse({
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     cont.addEventListener("wheel", onWheel, { passive: false });
+    cont.addEventListener("dblclick", onDblClick);
     cont.addEventListener("gesturestart", preventGesture);
     cont.addEventListener("gesturechange", preventGesture);
 
@@ -985,6 +1095,7 @@ export default function LiveUse({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
       cont.removeEventListener("wheel", onWheel);
+      cont.removeEventListener("dblclick", onDblClick);
       cont.removeEventListener("gesturestart", preventGesture);
       cont.removeEventListener("gesturechange", preventGesture);
       window.removeEventListener("resize", onResize);
@@ -1000,6 +1111,18 @@ export default function LiveUse({
   // not streaming we just pull one fresh frame so a stale shot isn't left up.
   useEffect(() => {
     let wasHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    // After the phone wakes, the Tailscale tunnel may take a moment to
+    // re-establish, so the first capture can time out. Retry a few times (with a
+    // forced refresh that breaks any stuck request) until a fresh frame lands,
+    // instead of leaving the screen frozen until the user fiddles by hand.
+    const recover = async () => {
+      setStatus({ text: "Reconnecting…", state: "busy" });
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (!mountedRef.current || document.visibilityState !== "visible") return;
+        if (await doRefresh(true)) return;
+        await new Promise((r) => setTimeout(r, 700));
+      }
+    };
     const resume = () => {
       if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
       if (!wasHidden) return;
@@ -1015,7 +1138,7 @@ export default function LiveUse({
         );
         setStatus({ text: `Streaming at ${STREAM_FPS} fps.`, state: "idle" });
       } else {
-        doRefresh();
+        recover();
       }
     };
     const onVisibility = () => {
@@ -1188,7 +1311,7 @@ export default function LiveUse({
               {pct}%
             </button>
             <button
-              onClick={doRefresh}
+              onClick={() => doRefresh(true)}
               disabled={busy}
               className="grid h-12 w-16 place-items-center rounded-[2px] border border-line-strong bg-ink/10 text-ink transition-colors hover:bg-ink/15 disabled:opacity-50"
               aria-label="Refresh screen now"

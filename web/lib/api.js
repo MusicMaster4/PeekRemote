@@ -14,6 +14,37 @@ async function req(path, options = {}) {
   return fetch(BASE + path, { credentials: "include", ...options });
 }
 
+// Default ceiling for capture/input requests. Over the Tailscale tunnel — which
+// goes idle while the phone is backgrounded and needs a moment to re-handshake
+// on return — a fetch on a connection that died meanwhile can otherwise hang for
+// a minute or more, freezing the UI. A timeout turns that into a fast, retryable
+// failure instead.
+const CAPTURE_TIMEOUT_MS = 12000;
+
+// Build an AbortSignal that fires on either an external signal (caller-driven
+// cancel) or a timeout, without relying on AbortSignal.any/timeout (not
+// available on all mobile browsers).
+function withDeadline(externalSignal, timeoutMs) {
+  const controller = new AbortController();
+  const onAbort = () => controller.abort();
+  if (externalSignal) {
+    if (externalSignal.aborted) controller.abort();
+    else externalSignal.addEventListener("abort", onAbort, { once: true });
+  }
+  const timer = timeoutMs ? setTimeout(() => controller.abort(), timeoutMs) : null;
+  const cleanup = () => {
+    if (timer) clearTimeout(timer);
+    if (externalSignal) externalSignal.removeEventListener("abort", onAbort);
+  };
+  return { signal: controller.signal, cleanup };
+}
+
+function timeoutError() {
+  const err = new Error("Request timed out.");
+  err.timeout = true;
+  return err;
+}
+
 function query(params) {
   const search = new URLSearchParams();
   Object.entries(params).forEach(([key, value]) => {
@@ -153,33 +184,57 @@ export function screenshotStreamUrl({ profile = "live", monitor, fps = 24, nonce
   return `${BASE}/api/screenshots/stream${query({ profile, monitor, fps, n: nonce })}`;
 }
 
-export async function captureScreenshot(profile = "photo", monitor) {
-  const res = await req(`/api/screenshots/raw${query({ profile, monitor })}`, {
-    method: "POST",
-  });
-  if (res.status === 401) throw unauthorized();
-  if (!res.ok) throw new Error(await detail(res, "Failed to capture the screen."));
-  return screenshotFromResponse(res);
+export async function captureScreenshot(profile = "photo", monitor, { signal } = {}) {
+  const deadline = withDeadline(signal, CAPTURE_TIMEOUT_MS);
+  try {
+    const res = await req(`/api/screenshots/raw${query({ profile, monitor })}`, {
+      method: "POST",
+      signal: deadline.signal,
+    });
+    if (res.status === 401) throw unauthorized();
+    if (!res.ok) throw new Error(await detail(res, "Failed to capture the screen."));
+    return await screenshotFromResponse(res);
+  } catch (err) {
+    throw err?.name === "AbortError" ? timeoutError() : err;
+  } finally {
+    deadline.cleanup();
+  }
 }
 
 export async function sendInput(payload) {
-  const res = await req("/api/input", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (res.status === 401) throw unauthorized();
-  if (!res.ok) throw new Error(await detail(res, "Couldn't send the command."));
-  return res.json();
+  const deadline = withDeadline(null, CAPTURE_TIMEOUT_MS);
+  try {
+    const res = await req("/api/input", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: deadline.signal,
+    });
+    if (res.status === 401) throw unauthorized();
+    if (!res.ok) throw new Error(await detail(res, "Couldn't send the command."));
+    return await res.json();
+  } catch (err) {
+    throw err?.name === "AbortError" ? timeoutError() : err;
+  } finally {
+    deadline.cleanup();
+  }
 }
 
 export async function sendInputAndCapture(payload) {
-  const res = await req("/api/input/screenshot/raw", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  if (res.status === 401) throw unauthorized();
-  if (!res.ok) throw new Error(await detail(res, "Couldn't send the command."));
-  return screenshotFromResponse(res);
+  const deadline = withDeadline(null, CAPTURE_TIMEOUT_MS);
+  try {
+    const res = await req("/api/input/screenshot/raw", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+      signal: deadline.signal,
+    });
+    if (res.status === 401) throw unauthorized();
+    if (!res.ok) throw new Error(await detail(res, "Couldn't send the command."));
+    return await screenshotFromResponse(res);
+  } catch (err) {
+    throw err?.name === "AbortError" ? timeoutError() : err;
+  } finally {
+    deadline.cleanup();
+  }
 }
