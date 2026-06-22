@@ -14,6 +14,7 @@ const {
   clipboard,
   shell,
   screen,
+  powerMonitor,
 } = require("electron");
 
 const config = require("./config");
@@ -94,6 +95,14 @@ async function init() {
     startPrivacyPolling();
   });
   backend.on("exit", onBackendExit);
+
+  // Coming back from sleep, the Tailscale daemon takes a few seconds to
+  // reconnect and its `serve` mapping can drop — which left the panel stuck on
+  // "Tailscale offline" even though the tailnet was fine. Re-publish the serve
+  // and nudge the UI to re-check once things settle. "unlock-screen" covers the
+  // lock/unlock path that doesn't always emit "resume".
+  powerMonitor.on("resume", onSystemResume);
+  powerMonitor.on("unlock-screen", onSystemResume);
 
   const c = config.load();
   if (c.onboardingComplete && c.pin) {
@@ -294,6 +303,38 @@ function onBackendExit({ code }) {
         .catch((err) => console.error("[main] restart failed:", err));
     }, 1500 * crashRestarts);
   }
+}
+
+// ---- Wake from sleep -----------------------------------------------------
+let resumeReconnectTimer = null;
+
+async function onSystemResume() {
+  // Tell the UI right away so it can show "reconnecting" and re-poll itself.
+  sendToRenderer("power:resume", {});
+  if (!backend.isRunning()) return;
+
+  // Re-apply `tailscale serve` and wait for the tailnet to come back. The
+  // daemon can take several seconds post-resume, so retry with backoff instead
+  // of giving up on the first (expected) failure.
+  if (resumeReconnectTimer) clearTimeout(resumeReconnectTimer);
+  const delays = [0, 1500, 3000, 5000, 8000];
+  let attempt = 0;
+
+  const tryReconnect = async () => {
+    resumeReconnectTimer = null;
+    const res = await backendRequest("/api/reconnect", { method: "POST" });
+    const ready = res.ok && res.data && res.data.tailscale_ready;
+    if (ready) {
+      sendToRenderer("power:resume", { ready: true });
+      return;
+    }
+    attempt += 1;
+    if (attempt < delays.length) {
+      resumeReconnectTimer = setTimeout(tryReconnect, delays[attempt]);
+    }
+  };
+
+  resumeReconnectTimer = setTimeout(tryReconnect, delays[0]);
 }
 
 // ---- Auto-start at login -------------------------------------------------

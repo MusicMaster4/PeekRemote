@@ -36,6 +36,7 @@ contextBridge.exposeInMainWorld("peek", {
   onBackendLog: (cb) => sub("backend:log", cb),
   onUpdateStatus: (cb) => sub("update:status", cb),
   onShowPairing: (cb) => sub("ui:show-pairing", cb),
+  onPowerResume: (cb) => sub("power:resume", cb),
 });
 
 function sub(channel, cb) {

@@ -1029,6 +1029,29 @@ async def connect_info(request: Request) -> JSONResponse:
     )
 
 
+@app.post("/api/reconnect")
+async def reconnect(
+    request: Request, _: SessionInfo | None = Depends(require_desktop_or_owner)
+) -> JSONResponse:
+    """Re-publica o app na tailnet e reporta se a conexão já voltou.
+
+    Necessário após o PC sair da suspensão: o daemon do Tailscale leva alguns
+    segundos para reconectar e o mapeamento do `tailscale serve` pode ter caído,
+    deixando o painel preso em "Tailscale offline" mesmo com a tailnet online.
+    Reaplicar o serve é idempotente, então é seguro chamar a cada resume.
+    """
+    port = settings.server_port
+    await run_in_threadpool(connect.ensure_serve, port)
+    app_url = await run_in_threadpool(connect.tailnet_url)
+    return JSONResponse(
+        {
+            "tailscale_ready": app_url is not None,
+            "tailscale_found": connect.tailscale_exe() is not None,
+            "app_url": app_url,
+        }
+    )
+
+
 @app.get("/api/qr-login")
 async def qr_login(request: Request, t: str | None = None) -> RedirectResponse:
     """Consome o token do QR e autentica a sessão (login sem PIN, uso único)."""

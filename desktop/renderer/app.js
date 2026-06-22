@@ -21,6 +21,8 @@ const state = {
   pin: "",
   qrTimer: null,
   qrExpiresAt: 0,
+  statusRetryTimer: null,
+  statusRetries: 0,
   updateState: "none",
   updateVersion: "",
   elevation: { usesElevatedTasks: false, isElevatedTaskLaunch: false },
@@ -68,6 +70,14 @@ function wireGlobalEvents() {
   window.peek.onUpdateStatus(handleUpdateStatus);
   window.peek.onShowPairing?.(() => showPanel());
 
+  // Woke from sleep: the main process is re-publishing the tailnet serve. Reset
+  // the backoff and re-poll so a stale "Tailscale offline" clears on its own.
+  window.peek.onPowerResume?.(() => {
+    state.statusRetries = 0;
+    updateStatus();
+    if (!$("#panel").hidden) loadConnect();
+  });
+
   $("#repo-link").addEventListener("click", (e) => {
     e.preventDefault();
     window.peek.openExternal(REPO_URL);
@@ -85,6 +95,10 @@ function setStatus(dotClass, text) {
 }
 
 async function updateStatus() {
+  if (state.statusRetryTimer) {
+    clearTimeout(state.statusRetryTimer);
+    state.statusRetryTimer = null;
+  }
   if (!state.backendRunning) {
     setStatus("dot-idle", "Starting…");
     return;
@@ -92,11 +106,26 @@ async function updateStatus() {
   // Backend up — confirm Tailscale is publishing.
   const res = await window.peek.connectInfo();
   if (res.ok && res.info && res.info.tailscale_ready) {
+    state.statusRetries = 0;
     setStatus("dot-ok", "Ready");
+    return;
+  }
+  // Not ready. Right after the PC wakes from sleep this is usually transient —
+  // the Tailscale daemon is still reconnecting — so re-poll for a while before
+  // settling on "offline" instead of leaving the panel stuck on a stale state.
+  if (state.statusRetries < STATUS_RETRY_DELAYS.length) {
+    setStatus("dot-idle", "Reconnecting…");
+    const delay = STATUS_RETRY_DELAYS[state.statusRetries];
+    state.statusRetries += 1;
+    state.statusRetryTimer = setTimeout(updateStatus, delay);
   } else {
     setStatus("dot-warn", "Tailscale offline");
   }
 }
+
+// Backoff schedule (ms) for self-healing status re-checks after a transient
+// offline, e.g. coming back from suspend. ~30s of coverage total.
+const STATUS_RETRY_DELAYS = [1500, 2500, 4000, 6000, 8000, 8000];
 
 // ---------------------------------------------------------------- views
 function showView(id) {
