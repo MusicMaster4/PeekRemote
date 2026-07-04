@@ -11,7 +11,7 @@ const QR_SVG = fs.readFileSync(path.join(__dirname, "_qr_placeholder.svg"), "utf
 
 // Generic, obviously-fake values.
 const FAKE_HOST = "your-pc.tailnet.ts.net";
-const APP_URL = `https://${FAKE_HOST}`;
+const APP_URL = `https://${FAKE_HOST}/peekremote`;
 const now = () => Math.floor(Date.now() / 1000);
 
 contextBridge.exposeInMainWorld("peek", {

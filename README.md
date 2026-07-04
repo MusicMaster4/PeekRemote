@@ -264,6 +264,7 @@ the environment or a `.env` file:
 | `SERVER_HOST` | `127.0.0.1` | Local host. Never bind to `0.0.0.0`. |
 | `SERVER_PORT` | `1739` | Local port and Tailscale Serve target. |
 | `TAILSCALE_PATH` | empty | Path to the Tailscale CLI. Empty = autodetect. |
+| `PUBLIC_BASE_PATH` | `/peekremote` | Public path used by Tailscale Serve, leaving the host root free. |
 | `QR_TTL_SECONDS` | `1800` | QR login token lifetime. |
 | `QR_OPEN_BROWSER` | `true` | Open the `/connect` page on start (the desktop app sets this to `false`). |
 | `AUDIT_LOG_FILE` | `audit.log` | Local audit log path. |

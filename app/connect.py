@@ -91,7 +91,16 @@ def ensure_serve(port: int) -> None:
 
     Idempotente: reaplicar o mesmo mapeamento não causa efeito colateral.
     """
-    result = _run(["serve", "--bg", f"http://127.0.0.1:{port}"], timeout=20.0)
+    target = f"http://127.0.0.1:{port}"
+    if settings.public_base_path:
+        # Remove the root mapping created by earlier versions of the app so the
+        # Tailscale host root can be reused by another service.
+        _run(["serve", "--bg", target, "off"], timeout=20.0)
+        args = ["serve", "--bg", f"--set-path={settings.public_base_path}", target]
+    else:
+        args = ["serve", "--bg", target]
+
+    result = _run(args, timeout=20.0)
     if result is None:
         return
     if result.returncode != 0:
@@ -101,7 +110,7 @@ def ensure_serve(port: int) -> None:
             (result.stderr or result.stdout or "").strip(),
         )
     else:
-        logger.info("tailscale serve ativo para http://127.0.0.1:%s", port)
+        logger.info("tailscale serve ativo em %s para %s", settings.public_base_path or "/", target)
 
 
 def tailnet_url() -> str | None:
@@ -116,7 +125,7 @@ def tailnet_url() -> str | None:
         return None
     if not dns_name:
         return None
-    return f"https://{dns_name}"
+    return f"https://{dns_name}{settings.public_base_path}"
 
 
 def qr_svg(text: str) -> str:

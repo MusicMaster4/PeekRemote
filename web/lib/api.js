@@ -2,7 +2,12 @@
 // In production the frontend is served by FastAPI itself (same origin),
 // so BASE stays empty. To develop with `next dev`, set
 // NEXT_PUBLIC_API_BASE=http://127.0.0.1:1739 in the environment.
-const BASE = process.env.NEXT_PUBLIC_API_BASE || "";
+const configuredBasePath = process.env.NEXT_PUBLIC_BASE_PATH || "/peekremote";
+const PUBLIC_BASE_PATH =
+  configuredBasePath && configuredBasePath !== "/"
+    ? `/${configuredBasePath.replace(/^\/+|\/+$/g, "")}`
+    : "";
+const BASE = process.env.NEXT_PUBLIC_API_BASE || PUBLIC_BASE_PATH;
 
 function unauthorized() {
   const err = new Error("Session expired.");
