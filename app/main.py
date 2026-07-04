@@ -57,6 +57,16 @@ logger = logging.getLogger(__name__)
 TUNNEL_URL_RE = re.compile(r"https://[\w.-]*trycloudflare.com[\w./-]*")
 
 
+def _public_path(path: str = "/") -> str:
+    base = settings.public_base_path
+    if not base:
+        return path
+    if path == "/":
+        return f"{base}/"
+    suffix = path if path.startswith("/") else f"/{path}"
+    return f"{base}{suffix}"
+
+
 def _host_os() -> str:
     """OS normalizado da MAQUINA controlada (host), exposto ao frontend para que
     os atalhos do Modo Ao Vivo facam sentido no sistema certo (ex.: Cmd no Mac
@@ -129,6 +139,16 @@ def _audit(event: str, request: Request, **fields: object) -> None:
 
 @app.middleware("http")
 async def add_security_headers(request: Request, call_next):
+    base = settings.public_base_path
+    if base:
+        path = request.scope.get("path", "")
+        if path == base:
+            request.scope["path"] = "/"
+            request.scope["root_path"] = f"{request.scope.get('root_path', '')}{base}"
+        elif path.startswith(f"{base}/"):
+            request.scope["path"] = path[len(base) :] or "/"
+            request.scope["root_path"] = f"{request.scope.get('root_path', '')}{base}"
+
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store"
     response.headers["Pragma"] = "no-cache"
@@ -1057,10 +1077,10 @@ async def qr_login(request: Request, t: str | None = None) -> RedirectResponse:
     """Consome o token do QR e autentica a sessão (login sem PIN, uso único)."""
     if not _verify_qr_token(t):
         # Inválido/expirado/já usado: cai na tela normal de PIN.
-        return RedirectResponse(url="/", status_code=303)
+        return RedirectResponse(url=_public_path("/"), status_code=303)
     token = _create_session(request)
     _audit("QR_LOGIN", request, owner=active_sessions[token].is_owner)
-    response = RedirectResponse(url="/", status_code=303)
+    response = RedirectResponse(url=_public_path("/"), status_code=303)
     _set_auth_cookie(response, request, token)
     return response
 

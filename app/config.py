@@ -82,6 +82,12 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("TAILSCALE_PATH"),
     )
+    # Caminho publico em que o app fica montado no Tailscale Serve. Por padrao
+    # libera a raiz do host Tailscale para outro servico.
+    public_base_path: str = Field(
+        default="/peekremote",
+        validation_alias=AliasChoices("PUBLIC_BASE_PATH", "APP_BASE_PATH", "TAILSCALE_SERVE_PATH"),
+    )
     # Validade do QR de conexao (token de login de uso unico), em segundos.
     # 30 min: o link da tailnet e fixo, entao nao ha motivo de girar rapido.
     qr_ttl_seconds: int = Field(
@@ -150,6 +156,19 @@ class Settings(BaseSettings):
         if fmt not in {"jpeg", "jpg", "png", "webp"}:
             raise ValueError("SCREENSHOT_FORMAT deve ser jpeg, png ou webp.")
         return "jpeg" if fmt == "jpg" else fmt
+
+    @field_validator("public_base_path")
+    @classmethod
+    def _normalize_public_base_path(cls, value: str) -> str:
+        path = value.strip()
+        if path in {"", "/"}:
+            return ""
+        if not path.startswith("/"):
+            path = f"/{path}"
+        path = path.rstrip("/")
+        if not re.fullmatch(r"(?:/[A-Za-z0-9._~-]+)+", path):
+            raise ValueError("PUBLIC_BASE_PATH deve ser um caminho de URL, ex.: /peekremote.")
+        return path
 
 
 settings = Settings()
