@@ -195,6 +195,11 @@ class ClipboardSyncRequest(BaseModel):
     enabled: bool
 
 
+# Large snippets, logs and source files are valid remote-input payloads. The
+# previous 2,000-character limit rejected them before they reached the PC.
+MAX_INPUT_TEXT_CHARS = 256_000
+
+
 class InputRequest(BaseModel):
     action: Literal["click", "drag", "scroll", "key", "hotkey", "text"]
     x: int = 0
@@ -208,7 +213,7 @@ class InputRequest(BaseModel):
     dy: int = Field(0, ge=-100, le=100)
     key: str | None = Field(None, max_length=32)
     keys: list[str] | None = None
-    text: str | None = Field(None, max_length=2000)
+    text: str | None = Field(None, max_length=MAX_INPUT_TEXT_CHARS)
 
     @field_validator("keys")
     @classmethod
@@ -253,6 +258,7 @@ class SessionInfo:
 # (em vez de cookie stateless) é o que permite LISTAR e EXPULSAR sessões.
 active_sessions: dict[str, SessionInfo] = {}
 capture_lock = asyncio.Lock()
+input_lock = asyncio.Lock()
 latest_screenshot = None
 latest_screenshot_key: tuple[str, int, int | None, int | None] | None = None
 latest_screenshot_at = 0.0
@@ -441,13 +447,16 @@ def require_desktop_or_auth(request: Request) -> SessionInfo | None:
 
 
 def _capture_options(
-    profile: Literal["photo", "live"], monitor_id: int | None = None
+    profile: Literal["photo", "live"],
+    monitor_id: int | None = None,
+    quality: int | None = None,
+    max_width: int | None = None,
 ) -> tuple[str, int, int | None, int | None]:
     if profile == "live":
         return (
             settings.screenshot_format,
-            settings.live_screenshot_quality,
-            settings.live_max_width,
+            quality if quality is not None else settings.live_screenshot_quality,
+            max_width if max_width is not None else settings.live_max_width,
             monitor_id,
         )
     return (settings.screenshot_format, settings.screenshot_quality, None, monitor_id)
@@ -458,6 +467,8 @@ async def _capture_cached(
     monitor_id: int | None = None,
     *,
     use_cache: bool = True,
+    quality: int | None = None,
+    max_width: int | None = None,
 ):
     """Captura serializada, com reuso curto para evitar frames duplicados.
 
@@ -467,7 +478,7 @@ async def _capture_cached(
     """
     global latest_screenshot, latest_screenshot_key, latest_screenshot_at
 
-    key = _capture_options(profile, monitor_id)
+    key = _capture_options(profile, monitor_id, quality, max_width)
     now = time.monotonic()
     cache_seconds = settings.screenshot_cache_ms / 1000
     if (
@@ -504,6 +515,21 @@ async def _capture_cached(
         latest_screenshot_key = key
         latest_screenshot_at = time.monotonic()
         return screenshot
+
+
+def _invalidate_screenshot_cache() -> None:
+    """Prevent a post-input response from returning a pre-input frame."""
+    global latest_screenshot, latest_screenshot_key, latest_screenshot_at
+    latest_screenshot = None
+    latest_screenshot_key = None
+    latest_screenshot_at = 0.0
+
+
+async def _run_input(payload: InputRequest) -> None:
+    """Serialize rapid mobile commands and invalidate the old screen frame."""
+    async with input_lock:
+        await run_in_threadpool(_perform_input, payload)
+        _invalidate_screenshot_cache()
 
 
 def _monitor_xy(x: int, y: int, monitor_id: int | None) -> tuple[int, int]:
@@ -874,8 +900,21 @@ async def handle_raw_screenshot(
     _: str = Depends(require_auth),
     profile: Literal["photo", "live"] = Query("photo"),
     monitor: int | None = Query(None, ge=1, le=64),
+    quality: int | None = Query(None, ge=30, le=80),
+    max_width: int | None = Query(None, ge=640, le=2560),
 ) -> Response:
-    screenshot = await _capture_cached(profile, monitor)
+    if profile == "photo":
+        quality = None
+        max_width = None
+    screenshot = await _capture_cached(
+        profile,
+        monitor,
+        # Phone live updates are sequential, so caching would only repeat an
+        # old frame and silently cap the selectable 24 FPS mode at ~8 FPS.
+        use_cache=profile == "photo",
+        quality=quality,
+        max_width=max_width,
+    )
     return Response(
         screenshot.data,
         media_type=screenshot.media_type,
@@ -885,6 +924,7 @@ async def handle_raw_screenshot(
 
 @app.get("/api/screenshots/stream")
 async def stream_screenshots(
+    request: Request,
     _: str = Depends(require_auth),
     profile: Literal["live"] = Query("live"),
     monitor: int | None = Query(None, ge=1, le=64),
@@ -894,16 +934,20 @@ async def stream_screenshots(
 
     async def frames():
         while True:
-            screenshot = await run_in_threadpool(
-                capture_screen,
-                image_format="jpeg",
-                quality=min(settings.live_screenshot_quality, 68),
-                max_width=settings.live_max_width,
-                monitor_id=monitor,
-            )
+            if await request.is_disconnected():
+                break
+            async with capture_lock:
+                screenshot = await run_in_threadpool(
+                    capture_screen,
+                    image_format="jpeg",
+                    quality=min(settings.live_screenshot_quality, 68),
+                    max_width=settings.live_max_width,
+                    monitor_id=monitor,
+                )
             yield (
                 b"--frame\r\n"
                 b"Content-Type: image/jpeg\r\n"
+                + f"Content-Length: {len(screenshot.data)}\r\n".encode("ascii")
                 + f"X-Screenshot-Width: {screenshot.width}\r\n".encode("ascii")
                 + f"X-Screenshot-Height: {screenshot.height}\r\n".encode("ascii")
                 + f"X-Screenshot-Monitor: {screenshot.monitor_id}\r\n\r\n".encode("ascii")
@@ -915,7 +959,7 @@ async def stream_screenshots(
     return StreamingResponse(
         frames(),
         media_type="multipart/x-mixed-replace; boundary=frame",
-        headers={"Cache-Control": "no-store"},
+        headers={"Cache-Control": "no-store", "X-Accel-Buffering": "no"},
     )
 
 
@@ -923,7 +967,7 @@ async def stream_screenshots(
 async def handle_input(payload: InputRequest, _: str = Depends(require_auth)) -> JSONResponse:
     """Injeta uma ação de mouse/teclado no computador (Modo Ao Vivo)."""
     try:
-        await run_in_threadpool(_perform_input, payload)
+        await _run_input(payload)
     except remote_input.InputUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except ValueError as exc:
@@ -939,7 +983,7 @@ async def handle_input_screenshot(
 ) -> Response:
     """Executa input, espera a UI reagir e devolve a tela nova em um request."""
     try:
-        await run_in_threadpool(_perform_input, payload)
+        await _run_input(payload)
         if settings.post_input_capture_delay_ms:
             await asyncio.sleep(settings.post_input_capture_delay_ms / 1000)
         screenshot = await _capture_cached("live", payload.monitor_id)

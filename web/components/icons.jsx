@@ -158,6 +158,16 @@ export function IconMonitor({ className }) {
   );
 }
 
+export function IconSettings({ className }) {
+  return (
+    <svg className={className} {...base}>
+      <path d="M4 7h10M18 7h2M4 17h2M10 17h10" />
+      <circle cx="16" cy="7" r="2" />
+      <circle cx="8" cy="17" r="2" />
+    </svg>
+  );
+}
+
 export function IconChevronLeft({ className }) {
   return (
     <svg className={className} {...base} strokeWidth={1.7}>

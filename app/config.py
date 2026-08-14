@@ -115,13 +115,13 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SCREENSHOT_QUALITY"),
     )
     live_screenshot_quality: int = Field(
-        default=68,
+        default=52,
         ge=1,
         le=95,
         validation_alias=AliasChoices("LIVE_SCREENSHOT_QUALITY"),
     )
     live_max_width: int = Field(
-        default=1920,
+        default=1280,
         ge=640,
         le=7680,
         validation_alias=AliasChoices("LIVE_MAX_WIDTH"),
@@ -133,7 +133,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("SCREENSHOT_CACHE_MS"),
     )
     post_input_capture_delay_ms: int = Field(
-        default=300,
+        default=120,
         ge=0,
         le=1000,
         validation_alias=AliasChoices("POST_INPUT_CAPTURE_DELAY_MS"),
@@ -143,7 +143,7 @@ class Settings(BaseSettings):
         validation_alias=AliasChoices("CLIPBOARD_SYNC_ENABLED"),
     )
     stream_fps: int = Field(
-        default=24,
+        default=10,
         ge=1,
         le=30,
         validation_alias=AliasChoices("STREAM_FPS"),

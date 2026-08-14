@@ -546,6 +546,20 @@ if _IS_WINDOWS:
                 f"Windows recusou o envio do comando de input (erro {code})."
             )
 
+    def _send_inputs(inputs: list[_INPUT]) -> None:
+        """Send a bounded batch instead of one native call per keyboard event."""
+        if not inputs:
+            return
+        array_type = _INPUT * len(inputs)
+        batch = array_type(*inputs)
+        sent = _user32.SendInput(len(batch), batch, ctypes.sizeof(_INPUT))
+        if sent != len(batch):
+            code = ctypes.GetLastError()
+            raise InputUnavailable(
+                f"Windows enviou apenas {sent} de {len(batch)} eventos de texto "
+                f"(erro {code})."
+            )
+
     def _win_vk_for(name: str) -> int | None:
         key = _normalize_key_name(name)
         if key in _WIN_VK:
@@ -656,21 +670,30 @@ if _IS_WINDOWS:
             for mod in reversed(mods):
                 _win_key_event(mod, True)
 
-    def _win_unicode_code_unit(code_unit: int, keyup: bool) -> None:
+    def _win_unicode_input(code_unit: int, keyup: bool) -> _INPUT:
         flags = _KEYEVENTF_UNICODE
         if keyup:
             flags |= _KEYEVENTF_KEYUP
         inp = _INPUT()
         inp.type = _INPUT_KEYBOARD
         inp.union.ki = _KEYBDINPUT(0, code_unit, flags, 0, None)
-        _send_input(inp)
+        return inp
 
     def _win_type_text(text: str) -> None:
         utf16 = text.encode("utf-16-le")
-        for i in range(0, len(utf16), 2):
-            code_unit = int.from_bytes(utf16[i : i + 2], "little")
-            _win_unicode_code_unit(code_unit, False)
-            _win_unicode_code_unit(code_unit, True)
+        # Two events are needed per UTF-16 unit. Small batches are much faster
+        # for long text, while the pause lets the target message queue drain.
+        units_per_batch = 128
+        for start in range(0, len(utf16), units_per_batch * 2):
+            chunk = utf16[start : start + units_per_batch * 2]
+            inputs: list[_INPUT] = []
+            for i in range(0, len(chunk), 2):
+                code_unit = int.from_bytes(chunk[i : i + 2], "little")
+                inputs.append(_win_unicode_input(code_unit, False))
+                inputs.append(_win_unicode_input(code_unit, True))
+            _send_inputs(inputs)
+            if start + len(chunk) < len(utf16):
+                time.sleep(0.001)
 
 
 def press_key(name: str) -> None:

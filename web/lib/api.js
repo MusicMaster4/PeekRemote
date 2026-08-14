@@ -149,10 +149,12 @@ export function screenshotStreamUrl({ profile = "live", monitor, fps = 24, nonce
   return `${BASE}/api/screenshots/stream${query({ profile, monitor, fps, n: nonce })}`;
 }
 
-export async function captureScreenshot(profile = "photo", monitor) {
-  const res = await req(`/api/screenshots/raw${query({ profile, monitor })}`, {
-    method: "POST",
-  });
+export async function captureScreenshot(profile = "photo", monitor, options = {}) {
+  const { quality, maxWidth, signal } = options;
+  const res = await req(
+    `/api/screenshots/raw${query({ profile, monitor, quality, max_width: maxWidth })}`,
+    { method: "POST", signal },
+  );
   if (res.status === 401) throw unauthorized();
   if (!res.ok) throw new Error(await detail(res, "Failed to capture the screen."));
   return screenshotFromResponse(res);
