@@ -8,7 +8,6 @@ import {
   getPrivacyState,
   listMonitors,
   revokeScreenshot,
-  screenshotStreamUrl,
   sendInput,
   sendInputAndCapture,
   setPrivacyMode,
@@ -26,6 +25,7 @@ import {
   IconUsers,
   IconLock,
   IconMonitor,
+  IconSettings,
   IconClipboard,
   IconCheck,
 } from "@/components/icons";
@@ -36,7 +36,39 @@ const MAX = 6;
 // Kept tiny so the screenshot (and the remote taskbar at its bottom edge) stays
 // as large and visible as possible.
 const SURFACE_GAP = 10;
-const STREAM_FPS = 24;
+// Sequential adaptive captures avoid the stale-frame backlog produced by a
+// fixed 24 FPS MJPEG stream on jittery 4G/5G links. Only one image is ever in
+// flight; measured transfer time selects the next payload size.
+const LIVE_PROFILES = [
+  { label: "economy", quality: 38, maxWidth: 720, interval: 250 },
+  { label: "balanced", quality: 44, maxWidth: 960, interval: 100 },
+  { label: "sharp", quality: 52, maxWidth: 1280, interval: 42 },
+];
+
+const RESOLUTION_PROFILES = {
+  480: { label: "480p", quality: 40, maxWidth: 854 },
+  720: { label: "720p", quality: 48, maxWidth: 1280 },
+  1080: { label: "1080p", quality: 58, maxWidth: 1920 },
+};
+
+const DEFAULT_LIVE_SETTINGS = { resolution: "auto", fps: 10 };
+const MAX_INPUT_TEXT_CHARS = 256000;
+
+function initialLiveProfile() {
+  if (typeof navigator === "undefined") return 1;
+  const connection = navigator.connection || navigator.mozConnection || navigator.webkitConnection;
+  if (
+    connection?.saveData ||
+    ["slow-2g", "2g", "3g"].includes(connection?.effectiveType) ||
+    (connection?.downlink && connection.downlink < 2) ||
+    (connection?.rtt && connection.rtt > 400)
+  ) {
+    return 0;
+  }
+  // Start conservatively even when the browser calls the link "4g". Cellular
+  // bandwidth can change faster than the Network Information API reports it.
+  return 1;
+}
 
 // Ready-made combos — avoid typing and getting the syntax wrong. They're OS
 // aware: the backend reports the HOST machine's OS (via /api/session → `os`) and
@@ -290,7 +322,6 @@ export default function LiveUse({
   const [pct, setPct] = useState(100);
   const [busy, setBusy] = useState(false);
   const [auto, setAuto] = useState(false);
-  const [streamUrl, setStreamUrl] = useState("");
   const [privacyOn, setPrivacyOn] = useState(false);
   const [privacyBusy, setPrivacyBusy] = useState(false);
   const [monitors, setMonitors] = useState([]);
@@ -298,6 +329,8 @@ export default function LiveUse({
   const monitorIdRef = useRef(initialShot?.monitorId || 1);
   const [status, setStatus] = useState({ text: "Ready.", state: "idle" });
   const [showHint, setShowHint] = useState(true);
+  const [showOptions, setShowOptions] = useState(false);
+  const [liveSettings, setLiveSettings] = useState(DEFAULT_LIVE_SETTINGS);
   // Latest text copied on the PC that we're relaying to the phone clipboard.
   // `copied` is true once it's actually on the phone (auto or after a tap).
   const [pcClip, setPcClip] = useState(null);
@@ -330,6 +363,11 @@ export default function LiveUse({
   const autoRef = useRef(false);
   const mountedRef = useRef(true);
   const refreshTimer = useRef(null);
+  const inputPendingRef = useRef(0);
+  const commandSeqRef = useRef(0);
+  const liveProfileRef = useRef(initialLiveProfile());
+  const adaptiveStatsRef = useRef({ fast: 0, slow: 0 });
+  const liveSettingsRef = useRef(DEFAULT_LIVE_SETTINGS);
   const ownedShotUrlsRef = useRef(new Set());
 
   const topbarRef = useRef(null);
@@ -346,6 +384,35 @@ export default function LiveUse({
   useEffect(() => {
     monitorIdRef.current = monitorId;
   }, [monitorId]);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem("peek-live-settings") || "null");
+      const resolution = ["auto", "480", "720", "1080"].includes(saved?.resolution)
+        ? saved.resolution
+        : DEFAULT_LIVE_SETTINGS.resolution;
+      const fps = [10, 24].includes(Number(saved?.fps)) ? Number(saved.fps) : 10;
+      const next = { resolution, fps };
+      liveSettingsRef.current = next;
+      setLiveSettings(next);
+    } catch {
+      // Storage can be unavailable in private browsing; defaults remain valid.
+    }
+  }, []);
+
+  const updateLiveSettings = (patch) => {
+    const next = { ...liveSettingsRef.current, ...patch };
+    liveSettingsRef.current = next;
+    setLiveSettings(next);
+    try {
+      localStorage.setItem("peek-live-settings", JSON.stringify(next));
+    } catch {
+      // The setting still applies for this session.
+    }
+    adaptiveStatsRef.current = { fast: 0, slow: 0 };
+    captureAbortRef.current?.abort();
+    if (autoRef.current) queueAutoRefresh(0);
+  };
 
   const replaceShot = (nextShot) => {
     if (nextShot?.image?.startsWith("blob:")) {
@@ -545,6 +612,10 @@ export default function LiveUse({
     if (busyRef.current) {
       if (!force) return false;
       captureAbortRef.current?.abort();
+    } else if (force) {
+      // In adaptive live mode the active capture does not own `busyRef`, but a
+      // forced refresh still needs to replace it instead of running in parallel.
+      captureAbortRef.current?.abort();
     }
     busyRef.current = true;
     setBusy(true);
@@ -580,45 +651,123 @@ export default function LiveUse({
     }
   };
 
-  const toggleAuto = () => {
-    setAuto((prev) => {
-      const next = !prev;
-      autoRef.current = next;
-      clearTimeout(refreshTimer.current);
-      setStreamUrl(
-        next
-          ? screenshotStreamUrl({
-              profile: "live",
-              monitor: monitorIdRef.current,
-              fps: STREAM_FPS,
-              nonce: Date.now(),
-            })
-          : "",
-      );
-      setStatus({
-        text: next ? `Streaming at ${STREAM_FPS} fps.` : "Auto stream off.",
-        state: "idle",
+  function queueAutoRefresh(delay = 0) {
+    clearTimeout(refreshTimer.current);
+    if (!autoRef.current || !mountedRef.current) return;
+    refreshTimer.current = setTimeout(runAutoRefresh, Math.max(0, delay));
+  }
+
+  async function runAutoRefresh() {
+    if (!autoRef.current || !mountedRef.current) return;
+    if (inputPendingRef.current || busyRef.current) {
+      queueAutoRefresh(80);
+      return;
+    }
+
+    const controller = new AbortController();
+    captureAbortRef.current = controller;
+    const level = liveProfileRef.current;
+    const settings = liveSettingsRef.current;
+    const adaptive = settings.resolution === "auto";
+    const profile = adaptive
+      ? LIVE_PROFILES[level]
+      : RESOLUTION_PROFILES[settings.resolution] || RESOLUTION_PROFILES[720];
+    const targetInterval = Math.max(profile.interval || 0, 1000 / settings.fps);
+    const started = performance.now();
+    try {
+      const data = await captureScreenshot("live", monitorIdRef.current, {
+        quality: profile.quality,
+        maxWidth: profile.maxWidth,
+        signal: controller.signal,
       });
-      if (!next) setTimeout(doRefresh, 0);
-      return next;
-    });
+      if (!mountedRef.current || !autoRef.current) {
+        revokeScreenshot(data);
+        return;
+      }
+      replaceShot(data);
+
+      const elapsed = performance.now() - started;
+      if (adaptive) {
+        const stats = adaptiveStatsRef.current;
+        stats.fast = elapsed < 280 ? stats.fast + 1 : 0;
+        stats.slow = elapsed > 600 ? stats.slow + 1 : 0;
+        let nextLevel = level;
+        if ((elapsed > 900 || stats.slow >= 2) && level > 0) {
+          nextLevel = level - 1;
+        } else if (stats.fast >= 4 && level < LIVE_PROFILES.length - 1) {
+          nextLevel = level + 1;
+        }
+        if (nextLevel !== level) {
+          liveProfileRef.current = nextLevel;
+          adaptiveStatsRef.current = { fast: 0, slow: 0 };
+          setStatus({ text: `Live quality: ${LIVE_PROFILES[nextLevel].label}.`, state: "idle" });
+        }
+      }
+    } catch (err) {
+      if (!controller.signal.aborted && err.name !== "AbortError" && mountedRef.current) {
+        if (err.unauthorized) return onLogout();
+        if (liveSettingsRef.current.resolution === "auto" && liveProfileRef.current > 0) {
+          liveProfileRef.current -= 1;
+        }
+        setStatus({ text: err.message || "Live refresh failed; retrying.", state: "error" });
+      }
+    } finally {
+      if (captureAbortRef.current === controller) captureAbortRef.current = null;
+      if (autoRef.current && inputPendingRef.current === 0) {
+        const elapsed = performance.now() - started;
+        queueAutoRefresh(Math.max(10, targetInterval - elapsed));
+      }
+    }
+  }
+
+  const toggleAuto = () => {
+    const next = !autoRef.current;
+    autoRef.current = next;
+    setAuto(next);
+    clearTimeout(refreshTimer.current);
+    captureAbortRef.current?.abort();
+    captureAbortRef.current = null;
+    if (next) {
+      liveProfileRef.current = initialLiveProfile();
+      adaptiveStatsRef.current = { fast: 0, slow: 0 };
+      const current = liveSettingsRef.current;
+      const label = current.resolution === "auto" ? "adaptive" : `${current.resolution}p`;
+      setStatus({ text: `Live updates: ${label}, up to ${current.fps} FPS.`, state: "idle" });
+      queueAutoRefresh(0);
+    } else {
+      setStatus({ text: "Auto updates off.", state: "idle" });
+      setTimeout(doRefresh, 0);
+    }
   };
 
   // ---- Sending actions ---------------------------------------------------
   const send = async (payload, label) => {
     const withMonitor = { ...payload, monitor_id: monitorIdRef.current };
+    const commandSeq = ++commandSeqRef.current;
+    inputPendingRef.current += 1;
+    clearTimeout(refreshTimer.current);
+    captureAbortRef.current?.abort();
     setStatus({ text: "Sending…", state: "busy" });
     try {
       if (autoRef.current) {
         await sendInput(withMonitor);
         if (!mountedRef.current) return;
-        setStatus({ text: label || "Sent.", state: "idle" });
+        if (commandSeq === commandSeqRef.current) {
+          setStatus({ text: label || "Sent.", state: "idle" });
+        }
         return true;
       }
       const data = await sendInputAndCapture(withMonitor);
-      if (!mountedRef.current) return;
-      replaceShot(data);
-      setStatus({ text: label || "Sent.", state: "idle" });
+      if (!mountedRef.current) {
+        revokeScreenshot(data);
+        return;
+      }
+      if (commandSeq === commandSeqRef.current) {
+        replaceShot(data);
+        setStatus({ text: label || "Sent.", state: "idle" });
+      } else {
+        revokeScreenshot(data);
+      }
       return true;
     } catch (err) {
       if (!mountedRef.current) return;
@@ -626,17 +775,27 @@ export default function LiveUse({
         onLogout();
         return false;
       }
-      setStatus({ text: err.message || "Send failed.", state: "error" });
+      if (commandSeq === commandSeqRef.current) {
+        setStatus({ text: err.message || "Send failed.", state: "error" });
+      }
       return false;
+    } finally {
+      inputPendingRef.current = Math.max(0, inputPendingRef.current - 1);
+      if (autoRef.current && inputPendingRef.current === 0) queueAutoRefresh(0);
     }
   };
 
   const pointXY = (point) => {
     const s = shotRef.current;
     if (!s || !point) return null;
+    // The live frame may be downscaled to save bandwidth. Pointer actions are
+    // interpreted in native monitor pixels, so map the fractional aim back to
+    // the dimensions captured before resizing.
+    const width = s.monitorWidth || s.width;
+    const height = s.monitorHeight || s.height;
     return {
-      x: Math.round(point.fx * s.width),
-      y: Math.round(point.fy * s.height),
+      x: Math.round(point.fx * Math.max(0, width - 1)),
+      y: Math.round(point.fy * Math.max(0, height - 1)),
     };
   };
 
@@ -782,11 +941,19 @@ export default function LiveUse({
     send({ action: "hotkey", keys }, keys.join(" + "));
   };
 
-  const sendTyped = () => {
+  const sendTyped = async () => {
     if (!textValue) return;
-    const text = enterAfter ? `${textValue}\n` : textValue;
-    send({ action: "text", text }, "Text sent.");
-    setTextValue("");
+    const submittedValue = textValue;
+    if (enterAfter && submittedValue.length >= MAX_INPUT_TEXT_CHARS) {
+      setStatus({ text: "Remove one character to append Enter.", state: "error" });
+      return;
+    }
+    const text = enterAfter ? `${submittedValue}\n` : submittedValue;
+    const ok = await send({ action: "text", text }, "Text sent.");
+    if (ok) {
+      // Do not erase anything the user typed while the request was in flight.
+      setTextValue((current) => (current === submittedValue ? "" : current));
+    }
   };
 
   const sendSpecial = (item) => send({ action: "key", key: item.key }, item.label);
@@ -802,18 +969,12 @@ export default function LiveUse({
     view.current = { scale: 1, tx: 0, ty: 0 };
     setPct(100);
     if (autoRef.current) {
-      setStreamUrl(
-        screenshotStreamUrl({
-          profile: "live",
-          monitor: parsed,
-          fps: STREAM_FPS,
-          nonce: Date.now(),
-        }),
-      );
+      captureAbortRef.current?.abort();
+      queueAutoRefresh(0);
     }
     requestAnimationFrame(() => {
       apply(true);
-      doRefresh();
+      if (!autoRef.current) doRefresh();
     });
   };
 
@@ -1128,15 +1289,10 @@ export default function LiveUse({
       if (!wasHidden) return;
       wasHidden = false;
       if (autoRef.current) {
-        setStreamUrl(
-          screenshotStreamUrl({
-            profile: "live",
-            monitor: monitorIdRef.current,
-            fps: STREAM_FPS,
-            nonce: Date.now(),
-          }),
-        );
-        setStatus({ text: `Streaming at ${STREAM_FPS} fps.`, state: "idle" });
+        captureAbortRef.current?.abort();
+        captureAbortRef.current = null;
+        setStatus({ text: "Reconnecting live updates…", state: "busy" });
+        queueAutoRefresh(0);
       } else {
         recover();
       }
@@ -1171,6 +1327,7 @@ export default function LiveUse({
       autoRef.current = false;
       document.body.style.overflow = prevOverflow;
       clearTimeout(refreshTimer.current);
+      captureAbortRef.current?.abort();
       ownedShotUrlsRef.current.forEach((url) => revokeScreenshot({ image: url }));
       ownedShotUrlsRef.current.clear();
     };
@@ -1196,17 +1353,10 @@ export default function LiveUse({
         {shot ? (
           <img
             ref={imgRef}
-            src={streamUrl || shot.image}
+            src={shot.image}
             alt="Live computer screen"
             draggable={false}
-            onError={() => {
-              if (autoRef.current) {
-                setAuto(false);
-                autoRef.current = false;
-                setStreamUrl("");
-                setStatus({ text: "Stream stopped.", state: "error" });
-              }
-            }}
+            onError={() => setStatus({ text: "Screen image could not be displayed.", state: "error" })}
             onLoad={() => {
               clampPan();
               apply();
@@ -1276,16 +1426,19 @@ export default function LiveUse({
                 <IconUsers className="h-[18px] w-[18px]" />
               </button>
             )}
-            {onSignOut && (
-              <button
-                onClick={onSignOut}
-                className="grid h-11 w-11 place-items-center rounded-[2px] border border-line bg-black/50 text-silver transition-colors hover:border-danger/50 hover:text-danger"
-                aria-label="Sign out"
-                title="Sign out"
-              >
-                <IconLogout className="h-[18px] w-[18px]" />
-              </button>
-            )}
+            <button
+              onClick={() => setShowOptions((value) => !value)}
+              className={`grid h-11 w-11 place-items-center rounded-[2px] border transition-colors ${
+                showOptions
+                  ? "border-ink/60 bg-ink/10 text-ink"
+                  : "border-line bg-black/50 text-silver hover:text-ink"
+              }`}
+              aria-expanded={showOptions}
+              aria-label="Live options"
+              title="Live options"
+            >
+              <IconSettings className="h-[19px] w-[19px]" />
+            </button>
             {monitors.length > 1 && (
               <label className="flex h-11 items-center gap-1.5 rounded-[2px] border border-line bg-black/50 px-2 text-silver">
                 <IconMonitor className="h-[16px] w-[16px] shrink-0" />
@@ -1327,8 +1480,8 @@ export default function LiveUse({
                   : "border-line bg-black/50 text-silver hover:text-ink"
               }`}
               aria-pressed={auto}
-              aria-label="Auto stream"
-              title="Auto stream"
+              aria-label="Automatic screen updates"
+              title="Automatic screen updates"
             >
               <IconLive className="h-[17px] w-[17px]" />
             </button>
@@ -1363,6 +1516,84 @@ export default function LiveUse({
           )}
         </div>
       </div>
+
+      {showOptions && (
+        <>
+          <button
+            className="absolute inset-0 z-20 bg-black/30"
+            onClick={() => setShowOptions(false)}
+            aria-label="Close live options"
+          />
+          <div className="absolute right-3 z-30 w-[min(330px,calc(100vw-1.5rem))] rounded-[3px] border border-line-strong bg-panel-solid p-4 shadow-[0_18px_55px_rgba(0,0,0,0.72)]"
+            style={{ top: "calc(4.2rem + env(safe-area-inset-top))" }}
+            role="dialog"
+            aria-label="Live options"
+          >
+            <div className="mb-4 flex items-center justify-between gap-3">
+              <div>
+                <p className="font-mono text-[0.68rem] uppercase tracking-stamp text-ink">Live options</p>
+                <p className="mt-1 text-xs text-muted">Lower settings react better on mobile data.</p>
+              </div>
+              <button
+                onClick={() => setShowOptions(false)}
+                className="h-9 rounded-[2px] border border-line px-3 font-mono text-[0.65rem] uppercase tracking-stamp text-silver"
+              >
+                Done
+              </button>
+            </div>
+
+            <fieldset>
+              <legend className="mb-2 font-mono text-[0.62rem] uppercase tracking-stamp text-muted">Resolution</legend>
+              <div className="grid grid-cols-4 gap-1.5">
+                {["auto", "480", "720", "1080"].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => updateLiveSettings({ resolution: value })}
+                    className={`h-10 rounded-[2px] border font-mono text-[0.66rem] uppercase transition-colors ${
+                      liveSettings.resolution === value
+                        ? "border-ink bg-ink text-[#08080a]"
+                        : "border-line bg-bg-soft text-silver hover:text-ink"
+                    }`}
+                  >
+                    {value === "auto" ? "Auto" : `${value}p`}
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            <fieldset className="mt-4">
+              <legend className="mb-2 font-mono text-[0.62rem] uppercase tracking-stamp text-muted">Frame rate</legend>
+              <div className="grid grid-cols-2 gap-1.5">
+                {[10, 24].map((value) => (
+                  <button
+                    key={value}
+                    type="button"
+                    onClick={() => updateLiveSettings({ fps: value })}
+                    className={`h-10 rounded-[2px] border font-mono text-[0.68rem] uppercase transition-colors ${
+                      liveSettings.fps === value
+                        ? "border-ink bg-ink text-[#08080a]"
+                        : "border-line bg-bg-soft text-silver hover:text-ink"
+                    }`}
+                  >
+                    {value} FPS
+                  </button>
+                ))}
+              </div>
+            </fieldset>
+
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                className="mt-5 flex h-11 w-full items-center justify-center gap-2 rounded-[2px] border border-danger/40 font-mono text-[0.68rem] uppercase tracking-stamp text-danger transition-colors hover:bg-danger/10"
+              >
+                <IconLogout className="h-[17px] w-[17px]" />
+                Sign out
+              </button>
+            )}
+          </div>
+        </>
+      )}
 
       {/* First-run gesture hint — fades out, never overlaps controls for long. */}
       {showHint && !dockHidden && !pcClip && (
@@ -1587,18 +1818,19 @@ export default function LiveUse({
                 </>
               ) : (
                 <>
-                  <input
+                  <textarea
                     value={textValue}
                     onChange={(e) => setTextValue(e.target.value)}
                     onKeyDown={(e) => {
-                      if (e.key === "Enter") {
+                      if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
                         e.preventDefault();
                         sendTyped();
                       }
                     }}
-                    placeholder="Type the text to send…"
+                    placeholder="Type or paste text… Ctrl/Cmd+Enter to send"
                     autoComplete="off"
-                    className="h-11 w-full rounded-[2px] border border-line bg-bg-soft px-3 text-[1rem] text-ink outline-none focus:border-line-strong"
+                    maxLength={MAX_INPUT_TEXT_CHARS}
+                    className="h-20 w-full resize-none rounded-[2px] border border-line bg-bg-soft px-3 py-2 text-[1rem] text-ink outline-none focus:border-line-strong"
                   />
                   <div className="flex items-center gap-2">
                     <Chip active={enterAfter} onClick={() => setEnterAfter((v) => !v)}>

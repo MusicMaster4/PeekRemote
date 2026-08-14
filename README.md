@@ -101,6 +101,8 @@ You can re-run this guide anytime from **Settings → Re-run setup**.
 3. You're now looking at your computer's screen. From there you can:
    - **Move and click** by dragging a crosshair, with pinch-to-zoom.
    - **Type** and send keyboard shortcuts.
+   - Open **Live options** to use adaptive quality or select 480p, 720p, or
+     1080p at up to 10 or 24 FPS. The phone remembers the selection.
    - **Use ready-made shortcuts** (Copy, Paste, switch apps, etc.).
    - **Put the computer to sleep** with a short cancel window.
 
@@ -269,6 +271,10 @@ the environment or a `.env` file:
 | `QR_OPEN_BROWSER` | `true` | Open the `/connect` page on start (the desktop app sets this to `false`). |
 | `AUDIT_LOG_FILE` | `audit.log` | Local audit log path. |
 | `MAX_FAILED_LOGINS` | `5` | Wrong PIN attempts before blocking until restart. |
+| `LIVE_SCREENSHOT_QUALITY` | `52` | Default JPEG quality for lightweight live captures. |
+| `LIVE_MAX_WIDTH` | `1280` | Default maximum live-capture width. |
+| `POST_INPUT_CAPTURE_DELAY_MS` | `120` | UI-settle delay before a post-command screen capture. |
+| `STREAM_FPS` | `10` | FPS used by the legacy multipart stream endpoint. |
 
 ### Troubleshooting
 
