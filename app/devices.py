@@ -13,6 +13,15 @@ from .config import settings
 _LOCK = threading.RLock()
 _CACHE: dict[str, dict[str, Any]] | None = None
 
+# One-time reset marker. The stored file carries the reset version it was last
+# written with; when this constant is higher, the device list is wiped exactly
+# once on first load after the update (and the file is rewritten with the new
+# marker, so it never resets again). Bump this whenever a release should start
+# from a clean device list — e.g. to clear the duplicates created before the
+# dedup fix. Do NOT bump it on routine releases, or users lose their device
+# names every update.
+_RESET_VERSION = 1
+
 
 def _data_dir() -> Path:
     path = settings.app_data_dir
@@ -31,14 +40,22 @@ def _load() -> dict[str, dict[str, Any]]:
     with _LOCK:
         if _CACHE is not None:
             return _CACHE
+        stored_reset = _RESET_VERSION
         try:
             raw = json.loads(_path().read_text(encoding="utf-8"))
             devices = raw.get("devices", {}) if isinstance(raw, dict) else {}
+            stored_reset = int(raw.get("reset_version", 0)) if isinstance(raw, dict) else 0
             _CACHE = {
                 str(k): v for k, v in devices.items() if isinstance(v, dict) and str(k)
             }
-        except (OSError, json.JSONDecodeError):
+        except (OSError, json.JSONDecodeError, ValueError, TypeError):
+            # Missing/corrupt file: nothing to reset, start clean at the current
+            # marker so the one-time wipe doesn't fire on a fresh install.
             _CACHE = {}
+        if stored_reset < _RESET_VERSION:
+            # First load after a release that requested a clean slate.
+            _CACHE = {}
+            _save()
         return _CACHE
 
 
@@ -47,7 +64,11 @@ def _save() -> None:
         path = _path()
         tmp = path.with_suffix(".tmp")
         tmp.write_text(
-            json.dumps({"devices": _CACHE or {}}, ensure_ascii=True, indent=2),
+            json.dumps(
+                {"devices": _CACHE or {}, "reset_version": _RESET_VERSION},
+                ensure_ascii=True,
+                indent=2,
+            ),
             encoding="utf-8",
         )
         tmp.replace(path)
@@ -90,6 +111,45 @@ def _android_model(user_agent: str) -> str:
     if not model or model.lower() in {"mobile", "tablet"}:
         return ""
     return model[:48]
+
+
+def find_device_id_by_fingerprint(user_agent: str, client_ip: str) -> str | None:
+    """Encontra um aparelho já conhecido pelo par (IP + user-agent).
+
+    Usado como rede de segurança quando o cookie de aparelho não chega (ex.: o
+    primeiro acesso vindo de um QR code não envia cookies `SameSite`). Dentro do
+    Tailscale cada aparelho tem um IP estável e único, então IP + user-agent é uma
+    impressão digital confiável para reconhecer "o mesmo aparelho reconectando" e
+    evitar criar uma entrada duplicada a cada conexão.
+    """
+    ip = (client_ip or "").strip()
+    ua = (user_agent or "")[:500]
+    if not ip or not ua:
+        return None
+    best_id: str | None = None
+    best_seen = -1.0
+    with _LOCK:
+        for device_id, device in _load().items():
+            if device.get("last_ip") != ip:
+                continue
+            if device.get("user_agent") != ua:
+                continue
+            seen = float(device.get("last_seen") or 0)
+            if seen > best_seen:
+                best_seen = seen
+                best_id = device_id
+    return best_id
+
+
+def delete_device(device_id: str) -> bool:
+    """Remove um aparelho da lista. Não bane nem bloqueia — só apaga o registro."""
+    with _LOCK:
+        devices = _load()
+        if device_id not in devices:
+            return False
+        del devices[device_id]
+        _save()
+        return True
 
 
 def touch_device(device_id: str, user_agent: str, client_ip: str) -> dict[str, Any]:

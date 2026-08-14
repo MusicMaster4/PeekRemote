@@ -11,8 +11,9 @@ os.environ.setdefault("APP_PIN", "749281")
 os.environ.setdefault("QR_OPEN_BROWSER", "false")
 
 from pydantic import ValidationError
+from PIL import Image
 
-from app import main, remote_input
+from app import main, remote_input, screenshot
 
 
 class InputPayloadTests(unittest.TestCase):
@@ -29,6 +30,19 @@ class InputPayloadTests(unittest.TestCase):
     def test_live_capture_options_can_be_tuned_per_phone(self) -> None:
         options = main._capture_options("live", 2, quality=40, max_width=854)
         self.assertEqual(options[1:], (40, 854, 2))
+
+    def test_resized_capture_keeps_native_monitor_dimensions(self) -> None:
+        monitor = screenshot.Monitor(id=2, left=1920, top=0, width=1920, height=1080)
+        image = Image.new("RGB", (monitor.width, monitor.height))
+
+        with patch.object(screenshot, "_grab_image", return_value=(image, monitor)):
+            shot = screenshot.capture_screen(max_width=960, monitor_id=monitor.id)
+
+        self.assertEqual((shot.width, shot.height), (960, 540))
+        self.assertEqual((shot.monitor_width, shot.monitor_height), (1920, 1080))
+        headers = main._screenshot_headers(shot)
+        self.assertEqual(headers["X-Screenshot-Monitor-Width"], "1920")
+        self.assertEqual(headers["X-Screenshot-Monitor-Height"], "1080")
 
 
 @unittest.skipUnless(os.name == "nt", "Windows SendInput batching is Windows-only")

@@ -26,6 +26,8 @@ class Screenshot:
     monitor_id: int
     monitor_left: int
     monitor_top: int
+    monitor_width: int
+    monitor_height: int
 
 
 @dataclass(frozen=True)
@@ -178,4 +180,6 @@ def capture_screen(
         monitor_id=monitor.id,
         monitor_left=monitor.left,
         monitor_top=monitor.top,
+        monitor_width=monitor.width,
+        monitor_height=monitor.height,
     )

@@ -294,21 +294,26 @@ def _create_session(request: Request) -> str:
     token = secrets.token_urlsafe(32)
     now = time.time()
     is_owner = not any(s.is_owner for s in active_sessions.values())
+    user_agent = request.headers.get("user-agent", "") or ""
+    client_ip = _client_key(request)
     device_id = request.cookies.get(DEVICE_COOKIE_NAME) or ""
     if not re.fullmatch(r"[A-Za-z0-9_-]{8,80}", device_id):
-        device_id = secrets.token_urlsafe(12)
-    devices.touch_device(
-        device_id,
-        request.headers.get("user-agent", "") or "",
-        _client_key(request),
-    )
+        # Sem cookie válido (ex.: primeiro acesso via QR não envia cookies
+        # SameSite): tenta reconhecer o aparelho pela impressão IP + user-agent
+        # antes de criar um id novo, senão o mesmo celular vira um aparelho
+        # diferente a cada conexão.
+        device_id = (
+            devices.find_device_id_by_fingerprint(user_agent, client_ip)
+            or secrets.token_urlsafe(12)
+        )
+    devices.touch_device(device_id, user_agent, client_ip)
     active_sessions[token] = SessionInfo(
         token=token,
         pub_id=secrets.token_urlsafe(6),
         created_at=now,
         last_seen=now,
-        client_ip=_client_key(request),
-        user_agent=(request.headers.get("user-agent", "") or "")[:200],
+        client_ip=client_ip,
+        user_agent=user_agent[:200],
         is_owner=is_owner,
         device_id=device_id,
     )
@@ -399,7 +404,10 @@ def _set_auth_cookie(response: Response, request: Request, token: str) -> None:
             max_age=DEVICE_COOKIE_SECONDS,
             httponly=True,
             secure=secure,
-            samesite="strict",
+            # "lax" (não "strict") para que o cookie volte numa navegação de topo
+            # vinda de fora do site — é o caso do QR code. Com "strict" o cookie
+            # não era enviado no /api/qr-login e cada acesso virava um aparelho novo.
+            samesite="lax",
         )
 
 
@@ -578,6 +586,8 @@ def _screenshot_headers(screenshot) -> dict[str, str]:
         "X-Screenshot-Monitor": str(screenshot.monitor_id),
         "X-Screenshot-Monitor-Left": str(screenshot.monitor_left),
         "X-Screenshot-Monitor-Top": str(screenshot.monitor_top),
+        "X-Screenshot-Monitor-Width": str(screenshot.monitor_width),
+        "X-Screenshot-Monitor-Height": str(screenshot.monitor_height),
     }
 
 
@@ -735,6 +745,19 @@ async def rename_paired_device(
     return JSONResponse({"device": device})
 
 
+@app.delete("/api/devices/{device_id}")
+async def delete_paired_device(
+    device_id: str,
+    request: Request,
+    _: SessionInfo | None = Depends(require_desktop_or_owner),
+) -> JSONResponse:
+    """Remove um aparelho da lista (apenas apaga o registro; não bane nem bloqueia)."""
+    if not devices.delete_device(device_id):
+        raise HTTPException(status_code=404, detail="Device not found.")
+    _audit("DEVICE_REMOVED", request, device=device_id)
+    return JSONResponse({"removed": device_id})
+
+
 @app.get("/api/monitors")
 async def monitors(_: str = Depends(require_auth)) -> JSONResponse:
     return JSONResponse(
@@ -758,6 +781,13 @@ async def monitors(_: str = Depends(require_auth)) -> JSONResponse:
 @app.get("/api/clipboard")
 async def latest_clipboard(_: str = Depends(require_auth)) -> JSONResponse:
     return JSONResponse(clipboard.latest())
+
+
+@app.post("/api/clipboard/read")
+async def read_clipboard_now(_: str = Depends(require_auth)) -> JSONResponse:
+    """Le o clipboard do PC na hora (acionado pelo botao Copy do celular), para o
+    texto recem-copiado ir ao clipboard do celular sem esperar o monitor."""
+    return JSONResponse(await run_in_threadpool(clipboard.read_now))
 
 
 @app.get("/api/clipboard-sync")
@@ -891,6 +921,8 @@ async def handle_screenshots(
             "monitor_id": screenshot.monitor_id,
             "monitor_left": screenshot.monitor_left,
             "monitor_top": screenshot.monitor_top,
+            "monitor_width": screenshot.monitor_width,
+            "monitor_height": screenshot.monitor_height,
         }
     )
 
@@ -950,7 +982,9 @@ async def stream_screenshots(
                 + f"Content-Length: {len(screenshot.data)}\r\n".encode("ascii")
                 + f"X-Screenshot-Width: {screenshot.width}\r\n".encode("ascii")
                 + f"X-Screenshot-Height: {screenshot.height}\r\n".encode("ascii")
-                + f"X-Screenshot-Monitor: {screenshot.monitor_id}\r\n\r\n".encode("ascii")
+                + f"X-Screenshot-Monitor: {screenshot.monitor_id}\r\n".encode("ascii")
+                + f"X-Screenshot-Monitor-Width: {screenshot.monitor_width}\r\n".encode("ascii")
+                + f"X-Screenshot-Monitor-Height: {screenshot.monitor_height}\r\n\r\n".encode("ascii")
                 + screenshot.data
                 + b"\r\n"
             )
@@ -1061,6 +1095,29 @@ async def connect_info(request: Request) -> JSONResponse:
             "expires_at": expires_at,
             "ttl_seconds": settings.qr_ttl_seconds,
             "os": HOST_OS,
+        }
+    )
+
+
+@app.post("/api/reconnect")
+async def reconnect(
+    request: Request, _: SessionInfo | None = Depends(require_desktop_or_owner)
+) -> JSONResponse:
+    """Re-publica o app na tailnet e reporta se a conexão já voltou.
+
+    Necessário após o PC sair da suspensão: o daemon do Tailscale leva alguns
+    segundos para reconectar e o mapeamento do `tailscale serve` pode ter caído,
+    deixando o painel preso em "Tailscale offline" mesmo com a tailnet online.
+    Reaplicar o serve é idempotente, então é seguro chamar a cada resume.
+    """
+    port = settings.server_port
+    await run_in_threadpool(connect.ensure_serve, port)
+    app_url = await run_in_threadpool(connect.tailnet_url)
+    return JSONResponse(
+        {
+            "tailscale_ready": app_url is not None,
+            "tailscale_found": connect.tailscale_exe() is not None,
+            "app_url": app_url,
         }
     )
 

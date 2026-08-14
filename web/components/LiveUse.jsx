@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   captureScreenshot,
   getClipboard,
+  readClipboardNow,
   getPrivacyState,
   listMonitors,
   revokeScreenshot,
@@ -25,6 +26,8 @@ import {
   IconLock,
   IconMonitor,
   IconSettings,
+  IconClipboard,
+  IconCheck,
 } from "@/components/icons";
 
 const MIN = 1;
@@ -231,6 +234,41 @@ const splitComboKeys = (value) => {
   return parts.map(normalizeKeyName).filter(Boolean);
 };
 
+// Copy text to the device clipboard, returning true on success. Tries the async
+// Clipboard API first (works on desktop and on Android Chrome while the page is
+// focused), then falls back to a hidden <textarea> + execCommand("copy") for
+// contexts that reject the async API (notably iOS Safari outside a user
+// gesture). Both paths can still be blocked when there's no user gesture — the
+// caller surfaces a tap-to-copy banner when this returns false.
+async function copyTextToClipboard(text) {
+  if (!text) return false;
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    /* fall through to the legacy path */
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.setAttribute("readonly", "");
+    ta.style.position = "fixed";
+    ta.style.top = "-1000px";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Live mode — remote control of the PC from the phone.
  *
@@ -272,6 +310,12 @@ export default function LiveUse({
   const view = useRef({ scale: 1, tx: 0, ty: 0 });
   const crosshair = useRef({ fx: 0.5, fy: 0.5 });
   const dragStartRef = useRef(null);
+  // Mirror of `dockHidden` for the gesture handlers, which are attached once and
+  // must read the latest value live (see the gesture effect below). When the
+  // dock is hidden the surface reverts to the original capture gestures: one
+  // finger pans the image and a double-tap zooms where you tapped. With the dock
+  // open it stays in "live control" mode: one finger moves the aim, two zoom.
+  const dockHiddenRef = useRef(true);
 
   const [shot, setShot] = useState(initialShot || null);
   const shotRef = useRef(shot);
@@ -287,6 +331,12 @@ export default function LiveUse({
   const [showHint, setShowHint] = useState(true);
   const [showOptions, setShowOptions] = useState(false);
   const [liveSettings, setLiveSettings] = useState(DEFAULT_LIVE_SETTINGS);
+  // Latest text copied on the PC that we're relaying to the phone clipboard.
+  // `copied` is true once it's actually on the phone (auto or after a tap).
+  const [pcClip, setPcClip] = useState(null);
+  // Clipboard hash already pushed to the phone via the Copy button, so the
+  // background poll doesn't re-announce the same text with a banner.
+  const handledHashRef = useRef("");
 
   // Controls
   const [tab, setTab] = useState("mouse"); // mouse | keyboard | special
@@ -306,10 +356,13 @@ export default function LiveUse({
   const [showFkeys, setShowFkeys] = useState(false);
 
   const busyRef = useRef(false);
+  // AbortController of the in-flight capture, so a forced refresh (manual tap or
+  // returning from background) can break a stuck request instead of waiting out
+  // a dead socket.
+  const captureAbortRef = useRef(null);
   const autoRef = useRef(false);
   const mountedRef = useRef(true);
   const refreshTimer = useRef(null);
-  const captureAbortRef = useRef(null);
   const inputPendingRef = useRef(0);
   const commandSeqRef = useRef(0);
   const liveProfileRef = useRef(initialLiveProfile());
@@ -443,6 +496,7 @@ export default function LiveUse({
   }, [surfaceInsets.top, surfaceInsets.bottom, kbInset]);
 
   useEffect(() => {
+    dockHiddenRef.current = dockHidden;
     if (!dockHidden) requestAnimationFrame(placeCrosshair);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dockHidden]);
@@ -524,6 +578,17 @@ export default function LiveUse({
     setPct(Math.round(ns * 100));
   };
 
+  // Double-tap zoom level (capture mode): roughly 1:1 actual pixels, clamped to
+  // a sane band so a huge screenshot doesn't fly to MAX and a small one still
+  // zooms in usefully. Mirrors the original ZoomViewer behavior.
+  const doubleTapTarget = () => {
+    const el = imgRef.current;
+    if (el && el.naturalWidth && el.offsetWidth) {
+      return Math.min(3.5, Math.max(2, el.naturalWidth / el.offsetWidth));
+    }
+    return 2.6;
+  };
+
   // Relative joystick: the aim does NOT jump to the finger. A drag of N pixels
   // on screen moves the aim N pixels (1:1) from where it already is. Since the
   // aim is stored as a fraction of the image, we convert the screen delta to a
@@ -540,21 +605,49 @@ export default function LiveUse({
   };
 
   // ---- Screenshot refresh ------------------------------------------------
-  const doRefresh = async () => {
-    if (busyRef.current) return;
+  // Returns true once a fresh frame is shown. `force` aborts a stuck in-flight
+  // capture (e.g. a dead connection after the phone was backgrounded) so we can
+  // start a clean one instead of waiting out the long socket timeout.
+  const doRefresh = async (force = false) => {
+    if (busyRef.current) {
+      if (!force) return false;
+      captureAbortRef.current?.abort();
+    } else if (force) {
+      // In adaptive live mode the active capture does not own `busyRef`, but a
+      // forced refresh still needs to replace it instead of running in parallel.
+      captureAbortRef.current?.abort();
+    }
     busyRef.current = true;
     setBusy(true);
+    const controller = new AbortController();
+    captureAbortRef.current = controller;
     try {
-      const data = await captureScreenshot("live", monitorIdRef.current);
-      if (!mountedRef.current) return;
+      const data = await captureScreenshot("live", monitorIdRef.current, {
+        signal: controller.signal,
+      });
+      if (!mountedRef.current || controller.signal.aborted) return false;
       replaceShot(data);
+      setStatus({ text: "Ready.", state: "idle" });
+      return true;
     } catch (err) {
-      if (!mountedRef.current) return;
-      if (err.unauthorized) return onLogout();
-      setStatus({ text: err.message || "Failed to refresh.", state: "error" });
+      if (controller.signal.aborted || !mountedRef.current) return false;
+      if (err.unauthorized) {
+        onLogout();
+        return false;
+      }
+      setStatus({
+        text: err.timeout ? "Reconnecting…" : err.message || "Failed to refresh.",
+        state: "error",
+      });
+      return false;
     } finally {
-      busyRef.current = false;
-      if (mountedRef.current) setBusy(false);
+      // Only the latest capture owns the busy flag; a superseded one must not
+      // clear it out from under its replacement.
+      if (captureAbortRef.current === controller) {
+        captureAbortRef.current = null;
+        busyRef.current = false;
+        if (mountedRef.current) setBusy(false);
+      }
     }
   };
 
@@ -566,7 +659,7 @@ export default function LiveUse({
 
   async function runAutoRefresh() {
     if (!autoRef.current || !mountedRef.current) return;
-    if (inputPendingRef.current) {
+    if (inputPendingRef.current || busyRef.current) {
       queueAutoRefresh(80);
       return;
     }
@@ -611,7 +704,7 @@ export default function LiveUse({
         }
       }
     } catch (err) {
-      if (err.name !== "AbortError" && mountedRef.current) {
+      if (!controller.signal.aborted && err.name !== "AbortError" && mountedRef.current) {
         if (err.unauthorized) return onLogout();
         if (liveSettingsRef.current.resolution === "auto" && liveProfileRef.current > 0) {
           liveProfileRef.current -= 1;
@@ -695,9 +788,14 @@ export default function LiveUse({
   const pointXY = (point) => {
     const s = shotRef.current;
     if (!s || !point) return null;
+    // The live frame may be downscaled to save bandwidth. Pointer actions are
+    // interpreted in native monitor pixels, so map the fractional aim back to
+    // the dimensions captured before resizing.
+    const width = s.monitorWidth || s.width;
+    const height = s.monitorHeight || s.height;
     return {
-      x: Math.round(point.fx * s.width),
-      y: Math.round(point.fy * s.height),
+      x: Math.round(point.fx * Math.max(0, width - 1)),
+      y: Math.round(point.fy * Math.max(0, height - 1)),
     };
   };
 
@@ -744,7 +842,81 @@ export default function LiveUse({
     send({ action: "scroll", x: xy.x, y: xy.y, dy }, "Scroll sent.");
   };
 
-  const sendPreset = (preset) => send({ action: "hotkey", keys: preset.keys }, preset.label);
+  // The "Copy" preset is special: tapping it is a user gesture, so we can put
+  // the text the PC just copied straight onto the phone's clipboard. We send
+  // Ctrl/Cmd+C, read the PC clipboard on demand, and write it here. On iOS
+  // Safari a plain awaited writeText would be rejected (the gesture is "spent"
+  // after the await), so we use the deferred ClipboardItem pattern: the write is
+  // started synchronously inside the tap and fed by a Promise that resolves once
+  // the text arrives — which keeps it gesture-driven.
+  const isCopyPreset = (preset) =>
+    preset.keys.length === 2 &&
+    preset.keys[1] === "c" &&
+    (preset.keys[0] === "ctrl" || preset.keys[0] === "cmd");
+
+  const grabPcCopy = async (preset) => {
+    await sendInput({ action: "hotkey", keys: preset.keys, monitor_id: monitorIdRef.current });
+    // Give the PC a moment to populate its clipboard before reading it back.
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    const data = await readClipboardNow();
+    const text = data?.enabled ? data.text || "" : "";
+    // Remember the hash so the background poll won't re-announce it as a banner.
+    if (data?.hash) handledHashRef.current = data.hash;
+    return text;
+  };
+
+  const afterCopy = (text, onPhone) => {
+    if (!mountedRef.current) return;
+    if (text) setPcClip({ text, copied: onPhone });
+    setStatus({
+      text: onPhone
+        ? "Copied — also on your phone."
+        : text
+          ? "Copied on PC. Tap the banner to copy here."
+          : "Copied on PC.",
+      state: "idle",
+    });
+    // Reflect any on-screen change (selection highlight, etc.).
+    if (!autoRef.current) doRefresh();
+  };
+
+  const copyFromPc = (preset) => {
+    setStatus({ text: "Copying…", state: "busy" });
+    // Preferred path — keep the async write inside the gesture via a deferred
+    // blob (works on iOS Safari and modern Chrome).
+    if (typeof ClipboardItem !== "undefined" && navigator.clipboard?.write) {
+      try {
+        let copied = "";
+        const blob = grabPcCopy(preset).then((text) => {
+          copied = text;
+          if (!text) throw new Error("empty");
+          return new Blob([text], { type: "text/plain" });
+        });
+        navigator.clipboard
+          .write([new ClipboardItem({ "text/plain": blob })])
+          .then(() => afterCopy(copied, true))
+          .catch(() => afterCopy(copied, false));
+        return;
+      } catch {
+        /* fall through to the plain path below */
+      }
+    }
+    // Fallback — plain async copy (desktop, older Android Chrome).
+    grabPcCopy(preset)
+      .then(async (text) => {
+        const onPhone = text ? await copyTextToClipboard(text) : false;
+        afterCopy(text, onPhone);
+      })
+      .catch((err) => {
+        if (err?.unauthorized) return onLogout();
+        if (mountedRef.current) setStatus({ text: "Copy failed.", state: "error" });
+      });
+  };
+
+  const sendPreset = (preset) =>
+    isCopyPreset(preset)
+      ? copyFromPc(preset)
+      : send({ action: "hotkey", keys: preset.keys }, preset.label);
 
   const sendCombo = () => {
     const typedKeys = splitComboKeys(comboKey);
@@ -860,15 +1032,26 @@ export default function LiveUse({
         if (!data.enabled) {
           lastHash = "";
           primed = false;
+          setPcClip(null);
           return;
         }
         if (data.hash && data.hash !== lastHash && data.text) {
           const shouldOffer = primed;
           lastHash = data.hash;
           primed = true;
-          if (shouldOffer && navigator.clipboard?.writeText) {
-            await navigator.clipboard.writeText(data.text);
-          }
+          // Skip whatever was already on the PC clipboard when we opened.
+          if (!shouldOffer) return;
+          // Skip text we just pushed to the phone via the Copy button.
+          if (data.hash === handledHashRef.current) return;
+          // Try a silent copy — works on desktop and Android Chrome while the
+          // tab is focused. iOS Safari (and any backgrounded tab) blocks
+          // clipboard writes that aren't tied to a tap, so when this fails we
+          // surface a tap-to-copy banner instead of failing silently (the old
+          // behavior — calling writeText from this background poll just threw,
+          // which is why PC→phone copy "did nothing").
+          const auto = document.hasFocus?.() ? await copyTextToClipboard(data.text) : false;
+          if (!active) return;
+          setPcClip({ text: data.text, copied: auto });
         }
       } catch (err) {
         if (err.unauthorized) onLogout();
@@ -882,14 +1065,43 @@ export default function LiveUse({
     };
   }, [onLogout]);
 
+  // Finish (or retry) the copy on tap — a user gesture always satisfies the
+  // browser's clipboard-write requirement.
+  const copyPcClip = async () => {
+    if (!pcClip) return;
+    const ok = await copyTextToClipboard(pcClip.text);
+    setPcClip((prev) => (prev ? { ...prev, copied: ok } : prev));
+    setStatus(
+      ok
+        ? { text: "Copied from PC to phone.", state: "idle" }
+        : { text: "Couldn't copy — try again.", state: "error" },
+    );
+  };
+
+  // Auto-dismiss the clipboard banner once the text is on the phone.
+  useEffect(() => {
+    if (!pcClip?.copied) return;
+    const t = setTimeout(() => setPcClip(null), 2600);
+    return () => clearTimeout(t);
+  }, [pcClip]);
+
   // ---- Gestures (touch + mouse for desktop testing) ----------------------
   useEffect(() => {
     const cont = containerRef.current;
     if (!cont) return;
 
     let gesture = null;
+    let lastTap = 0;
+    let lastTapPos = null;
     const dist = (a, b) => Math.hypot(a.clientX - b.clientX, a.clientY - b.clientY);
     const mid = (a, b) => ({ x: (a.clientX + b.clientX) / 2, y: (a.clientY + b.clientY) / 2 });
+
+    // One-finger gesture for the current mode: a pan (capture mode, dock hidden)
+    // or an aim nudge (live control, dock open).
+    const startOneFinger = (t, moved = false) =>
+      dockHiddenRef.current
+        ? { type: "pan", startX: t.clientX, startY: t.clientY, lastX: t.clientX, lastY: t.clientY, moved }
+        : { type: "aim", lastX: t.clientX, lastY: t.clientY };
 
     const onTouchStart = (e) => {
       if (e.touches.length === 2) {
@@ -897,9 +1109,7 @@ export default function LiveUse({
         const [a, b] = e.touches;
         gesture = { type: "pinch", d: dist(a, b), m: mid(a, b), s0: view.current.scale };
       } else if (e.touches.length === 1) {
-        const t = e.touches[0];
-        // Aim as a joystick: store the last point and move by delta.
-        gesture = { type: "aim", lastX: t.clientX, lastY: t.clientY };
+        gesture = startOneFinger(e.touches[0]);
       }
     };
 
@@ -928,20 +1138,61 @@ export default function LiveUse({
         nudgeAim(t.clientX - gesture.lastX, t.clientY - gesture.lastY);
         gesture.lastX = t.clientX;
         gesture.lastY = t.clientY;
+      } else if (gesture.type === "pan" && e.touches.length === 1) {
+        // Capture mode: one finger pans the zoomed image (1:1 with the finger).
+        const t = e.touches[0];
+        const dx = t.clientX - gesture.lastX;
+        const dy = t.clientY - gesture.lastY;
+        gesture.lastX = t.clientX;
+        gesture.lastY = t.clientY;
+        if (Math.abs(t.clientX - gesture.startX) + Math.abs(t.clientY - gesture.startY) > 10)
+          gesture.moved = true;
+        if (view.current.scale > 1) {
+          e.preventDefault();
+          view.current.tx += dx;
+          view.current.ty += dy;
+          clampPan();
+          apply();
+        }
       }
     };
 
     const onTouchEnd = (e) => {
+      const g = gesture;
+      // Capture mode: a tap that didn't pan is a (possible) double-tap to zoom.
+      if (g && g.type === "pan" && !g.moved) {
+        // preventDefault stops the browser from also synthesizing a click from
+        // this tap (which could otherwise re-trigger zoom).
+        e.preventDefault();
+        const t = e.changedTouches[0];
+        const now = Date.now();
+        if (
+          now - lastTap < 300 &&
+          lastTapPos &&
+          Math.hypot(t.clientX - lastTapPos.x, t.clientY - lastTapPos.y) < 30
+        ) {
+          if (view.current.scale > 1.05) zoomTo(1, undefined, undefined, true);
+          else zoomTo(doubleTapTarget(), t.clientX, t.clientY, true);
+          lastTap = 0;
+          lastTapPos = null;
+        } else {
+          lastTap = now;
+          lastTapPos = { x: t.clientX, y: t.clientY };
+        }
+      }
+
       if (e.touches.length === 0) {
         gesture = null;
       } else if (e.touches.length === 1) {
-        // Back to one finger from a pinch: re-anchor without jumping the aim.
-        const t = e.touches[0];
-        gesture = { type: "aim", lastX: t.clientX, lastY: t.clientY };
+        // Back to one finger from a pinch: re-anchor for the current mode
+        // without jumping the aim (treat as already moved so it isn't a tap).
+        gesture = startOneFinger(e.touches[0], true);
       }
     };
 
-    // Mouse (desktop testing): drag = move aim (relative), wheel = zoom.
+    // Mouse (desktop testing): wheel = zoom always. Drag moves the aim with the
+    // dock open, or pans the zoomed image when it's hidden; double-click zooms
+    // at the cursor in that capture mode.
     let dragging = null;
     const onMouseDown = (e) => {
       if (e.button !== 0) return;
@@ -949,7 +1200,16 @@ export default function LiveUse({
     };
     const onMouseMove = (e) => {
       if (!dragging) return;
-      nudgeAim(e.clientX - dragging.x, e.clientY - dragging.y);
+      if (dockHiddenRef.current) {
+        if (view.current.scale > 1) {
+          view.current.tx += e.clientX - dragging.x;
+          view.current.ty += e.clientY - dragging.y;
+          clampPan();
+          apply();
+        }
+      } else {
+        nudgeAim(e.clientX - dragging.x, e.clientY - dragging.y);
+      }
       dragging.x = e.clientX;
       dragging.y = e.clientY;
     };
@@ -961,6 +1221,12 @@ export default function LiveUse({
       const factor = e.deltaY < 0 ? 1 / 1.18 : 1.18;
       zoomTo(view.current.scale * factor, e.clientX, e.clientY);
     };
+    const onDblClick = (e) => {
+      if (!dockHiddenRef.current) return;
+      e.preventDefault();
+      if (view.current.scale > 1.05) zoomTo(1, undefined, undefined, true);
+      else zoomTo(doubleTapTarget(), e.clientX, e.clientY, true);
+    };
     const preventGesture = (e) => e.preventDefault();
 
     cont.addEventListener("touchstart", onTouchStart, { passive: false });
@@ -971,6 +1237,7 @@ export default function LiveUse({
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseup", onMouseUp);
     cont.addEventListener("wheel", onWheel, { passive: false });
+    cont.addEventListener("dblclick", onDblClick);
     cont.addEventListener("gesturestart", preventGesture);
     cont.addEventListener("gesturechange", preventGesture);
 
@@ -989,9 +1256,62 @@ export default function LiveUse({
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseup", onMouseUp);
       cont.removeEventListener("wheel", onWheel);
+      cont.removeEventListener("dblclick", onDblClick);
       cont.removeEventListener("gesturestart", preventGesture);
       cont.removeEventListener("gesturechange", preventGesture);
       window.removeEventListener("resize", onResize);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Reconnect the stream after the phone returns from the background. Mobile
+  // browsers freeze or drop the MJPEG connection while the tab is hidden (the
+  // user switches apps), and the <img> keeps a dead socket — showing a black
+  // frame with no error event — until streaming is toggled off/on by hand.
+  // Re-issuing the stream URL with a fresh nonce forces a clean reconnect; when
+  // not streaming we just pull one fresh frame so a stale shot isn't left up.
+  useEffect(() => {
+    let wasHidden = typeof document !== "undefined" && document.visibilityState === "hidden";
+    // After the phone wakes, the Tailscale tunnel may take a moment to
+    // re-establish, so the first capture can time out. Retry a few times (with a
+    // forced refresh that breaks any stuck request) until a fresh frame lands,
+    // instead of leaving the screen frozen until the user fiddles by hand.
+    const recover = async () => {
+      setStatus({ text: "Reconnecting…", state: "busy" });
+      for (let attempt = 0; attempt < 4; attempt++) {
+        if (!mountedRef.current || document.visibilityState !== "visible") return;
+        if (await doRefresh(true)) return;
+        await new Promise((r) => setTimeout(r, 700));
+      }
+    };
+    const resume = () => {
+      if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+      if (!wasHidden) return;
+      wasHidden = false;
+      if (autoRef.current) {
+        captureAbortRef.current?.abort();
+        captureAbortRef.current = null;
+        setStatus({ text: "Reconnecting live updates…", state: "busy" });
+        queueAutoRefresh(0);
+      } else {
+        recover();
+      }
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "hidden") wasHidden = true;
+      else resume();
+    };
+    const onPageShow = (e) => {
+      if (e.persisted) {
+        wasHidden = true;
+        resume();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("pageshow", onPageShow);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("pageshow", onPageShow);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -1144,7 +1464,7 @@ export default function LiveUse({
               {pct}%
             </button>
             <button
-              onClick={doRefresh}
+              onClick={() => doRefresh(true)}
               disabled={busy}
               className="grid h-12 w-16 place-items-center rounded-[2px] border border-line-strong bg-ink/10 text-ink transition-colors hover:bg-ink/15 disabled:opacity-50"
               aria-label="Refresh screen now"
@@ -1276,11 +1596,39 @@ export default function LiveUse({
       )}
 
       {/* First-run gesture hint — fades out, never overlaps controls for long. */}
-      {showHint && !dockHidden && (
+      {showHint && !dockHidden && !pcClip && (
         <div
           className="pointer-events-none absolute left-1/2 top-[calc(env(safe-area-inset-top)+5.2rem)] z-10 -translate-x-1/2 animate-fadein whitespace-nowrap rounded-full border border-line bg-black/70 px-3 py-1.5 font-mono text-[0.58rem] uppercase tracking-stamp text-silver"
         >
           1 finger: move aim · 2 fingers: zoom
+        </div>
+      )}
+
+      {/* Clipboard relay — text just copied on the PC. We try to push it to the
+          phone clipboard automatically; when the browser blocks that (common on
+          mobile, where writes need a tap), this banner finishes the copy with a
+          single touch. */}
+      {pcClip && (
+        <div className="pointer-events-none absolute inset-x-0 top-[calc(env(safe-area-inset-top)+5.6rem)] z-30 flex justify-center px-3">
+          <button
+            onClick={copyPcClip}
+            className={`pointer-events-auto flex max-w-[min(92vw,420px)] items-center gap-2.5 rounded-[2px] border bg-panel-solid px-4 py-2.5 text-left shadow-[0_10px_30px_rgba(0,0,0,0.5)] transition-colors ${
+              pcClip.copied
+                ? "border-ink/40 text-ink"
+                : "border-line-strong text-silver hover:text-ink active:scale-[0.98]"
+            }`}
+            aria-label={pcClip.copied ? "Copied from PC" : "Copy text from PC to phone"}
+          >
+            <span className="grid h-7 w-7 shrink-0 place-items-center rounded-[2px] border border-line bg-black/40">
+              {pcClip.copied ? <IconCheck className="h-4 w-4" /> : <IconClipboard className="h-4 w-4" />}
+            </span>
+            <span className="flex min-w-0 flex-col font-mono">
+              <span className="text-[0.56rem] uppercase tracking-stamp text-faint">
+                {pcClip.copied ? "Copied from PC" : "From PC · tap to copy"}
+              </span>
+              <span className="truncate text-[0.78rem] text-silver">{pcClip.text}</span>
+            </span>
+          </button>
         </div>
       )}
 

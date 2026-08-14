@@ -12,6 +12,7 @@ contextBridge.exposeInMainWorld("peek", {
   backendLogs: () => ipcRenderer.invoke("backend:logs"),
   listDevices: () => ipcRenderer.invoke("devices:list"),
   renameDevice: (payload) => ipcRenderer.invoke("devices:rename", payload),
+  deleteDevice: (payload) => ipcRenderer.invoke("devices:delete", payload),
 
   // Onboarding + settings
   completeOnboarding: (payload) => ipcRenderer.invoke("onboarding:complete", payload),
@@ -35,6 +36,7 @@ contextBridge.exposeInMainWorld("peek", {
   onBackendLog: (cb) => sub("backend:log", cb),
   onUpdateStatus: (cb) => sub("update:status", cb),
   onShowPairing: (cb) => sub("ui:show-pairing", cb),
+  onPowerResume: (cb) => sub("power:resume", cb),
 });
 
 function sub(channel, cb) {

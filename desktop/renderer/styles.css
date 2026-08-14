@@ -982,8 +982,25 @@ a {
   margin-top: 6px;
   color: var(--muted);
 }
+.device-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
 .device-save {
   min-width: 96px;
+}
+.device-remove {
+  min-width: 96px;
+  color: var(--muted);
+}
+.device-remove:not(:disabled):hover {
+  color: var(--danger, #c96a5b);
+  border-color: var(--danger, #c96a5b);
+}
+.device-remove:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 /* Reduced-motion: honor the OS setting (and keep idle work nil). */
