@@ -214,6 +214,8 @@ class InputRequest(BaseModel):
     key: str | None = Field(None, max_length=32)
     keys: list[str] | None = None
     text: str | None = Field(None, max_length=MAX_INPUT_TEXT_CHARS)
+    quality: int | None = Field(None, ge=30, le=80)
+    max_width: int | None = Field(None, ge=640, le=2560)
 
     @field_validator("keys")
     @classmethod
@@ -1020,7 +1022,12 @@ async def handle_input_screenshot(
         await _run_input(payload)
         if settings.post_input_capture_delay_ms:
             await asyncio.sleep(settings.post_input_capture_delay_ms / 1000)
-        screenshot = await _capture_cached("live", payload.monitor_id)
+        screenshot = await _capture_cached(
+            "live",
+            payload.monitor_id,
+            quality=payload.quality,
+            max_width=payload.max_width,
+        )
     except remote_input.InputUnavailable as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     except ValueError as exc:

@@ -31,6 +31,11 @@ class InputPayloadTests(unittest.TestCase):
         options = main._capture_options("live", 2, quality=40, max_width=854)
         self.assertEqual(options[1:], (40, 854, 2))
 
+    def test_input_screenshot_accepts_live_quality(self) -> None:
+        payload = main.InputRequest(action="click", x=10, y=20, quality=58, max_width=1920)
+        self.assertEqual(payload.quality, 58)
+        self.assertEqual(payload.max_width, 1920)
+
     def test_resized_capture_keeps_native_monitor_dimensions(self) -> None:
         monitor = screenshot.Monitor(id=2, left=1920, top=0, width=1920, height=1080)
         image = Image.new("RGB", (monitor.width, monitor.height))

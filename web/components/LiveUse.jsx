@@ -52,6 +52,24 @@ const RESOLUTION_PROFILES = {
 };
 
 const DEFAULT_LIVE_SETTINGS = { resolution: "auto", fps: 10 };
+
+function liveCaptureProfile(settings, adaptiveLevel = 1) {
+  if (settings?.resolution === "auto") {
+    return LIVE_PROFILES[adaptiveLevel] || LIVE_PROFILES[1];
+  }
+  return RESOLUTION_PROFILES[settings?.resolution] || RESOLUTION_PROFILES[720];
+}
+
+// A still frame is one payload, so Auto can spend the sharpest live tier
+// instead of starting at the conservative adaptive level. Fixed resolutions
+// use the exact live profile the user picked.
+function stillCaptureProfile(settings) {
+  if (settings?.resolution === "auto") {
+    return LIVE_PROFILES[LIVE_PROFILES.length - 1];
+  }
+  return liveCaptureProfile(settings);
+}
+
 const MAX_INPUT_TEXT_CHARS = 256000;
 
 function initialLiveProfile() {
@@ -401,7 +419,8 @@ export default function LiveUse({
   }, []);
 
   const updateLiveSettings = (patch) => {
-    const next = { ...liveSettingsRef.current, ...patch };
+    const prev = liveSettingsRef.current;
+    const next = { ...prev, ...patch };
     liveSettingsRef.current = next;
     setLiveSettings(next);
     try {
@@ -411,7 +430,12 @@ export default function LiveUse({
     }
     adaptiveStatsRef.current = { fast: 0, slow: 0 };
     captureAbortRef.current?.abort();
-    if (autoRef.current) queueAutoRefresh(0);
+    if (autoRef.current) {
+      queueAutoRefresh(0);
+    } else if (patch.resolution && patch.resolution !== prev.resolution) {
+      // Recapture the still image at the newly selected live resolution.
+      setTimeout(() => doRefresh(true), 0);
+    }
   };
 
   const replaceShot = (nextShot) => {
@@ -622,7 +646,10 @@ export default function LiveUse({
     const controller = new AbortController();
     captureAbortRef.current = controller;
     try {
+      const profile = stillCaptureProfile(liveSettingsRef.current);
       const data = await captureScreenshot("live", monitorIdRef.current, {
+        quality: profile.quality,
+        maxWidth: profile.maxWidth,
         signal: controller.signal,
       });
       if (!mountedRef.current || controller.signal.aborted) return false;
@@ -669,9 +696,7 @@ export default function LiveUse({
     const level = liveProfileRef.current;
     const settings = liveSettingsRef.current;
     const adaptive = settings.resolution === "auto";
-    const profile = adaptive
-      ? LIVE_PROFILES[level]
-      : RESOLUTION_PROFILES[settings.resolution] || RESOLUTION_PROFILES[720];
+    const profile = liveCaptureProfile(settings, level);
     const targetInterval = Math.max(profile.interval || 0, 1000 / settings.fps);
     const started = performance.now();
     try {
@@ -742,7 +767,13 @@ export default function LiveUse({
 
   // ---- Sending actions ---------------------------------------------------
   const send = async (payload, label) => {
-    const withMonitor = { ...payload, monitor_id: monitorIdRef.current };
+    const profile = stillCaptureProfile(liveSettingsRef.current);
+    const withMonitor = {
+      ...payload,
+      monitor_id: monitorIdRef.current,
+      quality: profile.quality,
+      max_width: profile.maxWidth,
+    };
     const commandSeq = ++commandSeqRef.current;
     inputPendingRef.current += 1;
     clearTimeout(refreshTimer.current);
